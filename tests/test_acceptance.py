@@ -12,6 +12,14 @@ import sys
 import unittest
 from datetime import datetime, timedelta
 
+# 测试一律在降级模式下运行：确定性、离线可跑、不消耗 API 额度。
+# 必须放在导入 backend 之前 —— backend 包会在导入时读取 .env。
+# 需要验证「大模型在线」的用例（LLMLiveCase）会自己临时设置密钥并替换 urlopen。
+import os  # noqa: E402
+
+os.environ["BANK_AGENT_SKIP_ENV_FILE"] = "1"
+os.environ.pop("LLM_API_KEY", None)
+
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent.parent))
 
 from backend import agent, attacks, bank, nlu, risk, voice  # noqa: E402
@@ -34,6 +42,9 @@ class IntentCase(unittest.TestCase):
         ("我的卡丢了，赶紧挂失", "card_loss", None),
         ("把境外交易关掉", "card_switch", None),
         ("有没有乱扣费的订阅", "subscription_scan", None),
+        # 老人端「常用说法」里的这句是"订阅在前、取消在后"的语序，
+        # 必须判成取消订阅而不是查订阅 —— 两种语序都要认。
+        ("有没有乱扣费的订阅，帮我取消", "subscription_cancel", None),
         ("帮我取消自动续费", "subscription_cancel", None),
         ("最近有什么安排要提醒我", "calendar_query", None),
         ("我卡里还有多少钱", "balance_query", None),
@@ -920,6 +931,26 @@ class LLMIntegrationCase(FakeLLMMixin, unittest.TestCase):
         self.assertEqual(nlu.parse_intent("老李住院了，我意思一下五百").name, "unknown",
                          "模型编造的意图名一律视为无效")
 
+    def test_last_error_is_recorded_when_the_call_fails(self):
+        """配了密钥却连不上时，必须能在 /system/status 看到原因。"""
+        import urllib.error
+        import urllib.request
+
+        real_urlopen = urllib.request.urlopen
+        nlu.call_llm = self._real_call_llm
+        urllib.request.urlopen = lambda *a, **k: (_ for _ in ()).throw(
+            urllib.error.URLError("模拟断网"))
+        os.environ["LLM_API_KEY"] = "test-key"
+        try:
+            nlu.clear_llm_cache()
+            self.assertIsNone(nlu.call_llm("给老李转五十块"))
+            self.assertIn("URLError", nlu.llm_last_error() or "")
+        finally:
+            urllib.request.urlopen = real_urlopen
+            os.environ.pop("LLM_API_KEY", None)
+            nlu.clear_llm_cache()
+        self.assertIsNone(nlu.llm_last_error(), "清缓存后应复位")
+
     def test_model_amount_must_exist_in_the_utterance(self):
         """模型可以补金额，但那个数字必须真的出现在原话里。"""
         self.fake_llm([{"intent": "transfer", "payee": "老李", "amount": 8888}])
@@ -1115,6 +1146,22 @@ class EnvFileCase(unittest.TestCase):
     def test_missing_env_file_is_not_an_error(self):
         from backend import load_env_file
         self.assertEqual(load_env_file(pathlib.Path("不存在的目录/.env")), 0)
+
+    def test_skip_flag_only_blocks_the_implicit_load(self):
+        """测试套件靠这个开关跑在降级模式；显式传路径的调用不受影响。"""
+        import os
+        import tempfile
+
+        from backend import load_env_file
+        with tempfile.TemporaryDirectory() as tmp:
+            env_path = pathlib.Path(tmp) / ".env"
+            env_path.write_text("SKIP_FLAG_PROBE=1\n", encoding="utf-8")
+            self.assertEqual(os.environ.get("BANK_AGENT_SKIP_ENV_FILE"), "1")
+            try:
+                self.assertEqual(load_env_file(env_path), 1, "显式路径不受开关影响")
+                os.environ.pop("SKIP_FLAG_PROBE", None)
+            finally:
+                os.environ.pop("SKIP_FLAG_PROBE", None)
 
     def test_env_example_lists_all_supported_keys(self):
         example = (ROOT / ".env.example").read_text(encoding="utf-8")

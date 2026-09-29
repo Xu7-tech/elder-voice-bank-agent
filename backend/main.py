@@ -352,6 +352,8 @@ def system_status():
         "llm_base_url": cfg["base_url"],
         "llm_model": cfg["model"],
         "llm_live": llm_live,
+        # 配了密钥却连不上时，这里会显示原因，避免"看起来配好了其实没生效"
+        "llm_last_error": nlu.llm_last_error(),
         # /asr 接口可用的通道 vs 随仓库的 Web 界面实际走的通道
         "asr_provider": "xfyun-iat" if cloud_asr else "browser-native-stt",
         "asr_in_use": "browser-native-stt",

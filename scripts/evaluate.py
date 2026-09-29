@@ -126,7 +126,7 @@ HALLUCINATION_SET = [
 PARAPHRASE_SET = [
     ("老李住院了，我意思一下五百", "transfer"),
     ("闺女手头紧，我要帮她凑点", "transfer"),
-    ("帮我看看上个月是不是被人多扣了", "subscription_scan"),
+    ("帮我查查有没有被人偷偷开通的服务", "subscription_scan"),
 ]
 
 
@@ -160,7 +160,8 @@ def run() -> dict:
     agent.reset_all()
     result: dict = {"generated_at": started.isoformat(timespec="seconds"),
                     "environment": {
-                        "llm": "qwen" if nlu.llm_available() else "rule-engine-fallback",
+                        "llm": (f"{nlu.llm_config()['model']}（{nlu.llm_config()['base_url']}）"
+                                if nlu.llm_available() else "rule-engine-fallback"),
                         "asr": "xfyun-iat" if voice.stt_available() else "browser-native-stt",
                         "tts": "xfyun-tts" if voice.tts_available() else "browser-speech-synthesis",
                     }}

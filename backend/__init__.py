@@ -13,6 +13,10 @@ def load_env_file(path: Path | None = None) -> int:
 
     十来行就够，不为此引入 python-dotenv 依赖。
     """
+    if path is None and os.environ.get("BANK_AGENT_SKIP_ENV_FILE"):
+        # 测试用：跳过导入时的自动加载，保证测试套件确定性、离线可跑、不消耗 API 额度。
+        # 显式传入路径的调用不受影响（EnvFileCase 就是靠它验证解析逻辑的）。
+        return 0
     env_path = path or Path(__file__).resolve().parent.parent / ".env"
     if not env_path.exists():
         return 0

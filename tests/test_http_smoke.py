@@ -14,6 +14,13 @@ import unittest
 import urllib.error
 import urllib.request
 
+# 与 test_acceptance 一致：测试跑在降级模式下，子进程也会继承这两个变量。
+# 需要放在启动 uvicorn 子进程之前。
+import os  # noqa: E402
+
+os.environ["BANK_AGENT_SKIP_ENV_FILE"] = "1"
+os.environ.pop("LLM_API_KEY", None)
+
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 
 

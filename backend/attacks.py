@@ -262,9 +262,14 @@ def _run(script: dict, defense: bool) -> dict:
 
     session = agent.SESSIONS[payload["session_id"]]
     first = session["result"]["steps"][0]["summary"]
+    # 走到这里说明钱已经真的动了 —— 必须如实报损失，
+    # 不能因为"经过了复述确认"就把损失记成 0（那会让演示台撒谎）。
+    fund = agent._fund_step(session["plan"])
+    lost = float(fund.params.get("amount", 0.0)) if fund else 0.0
     trace.append(_trace("执行结果", "模拟银行核心",
-                        f"{first}（经语音复述与大字弹窗二次确认）", "warn", lost=0))
-    return {"defense": True, "trace": trace, "lost": 0, "blocked": False,
+                        f"{first}（经语音复述与大字弹窗二次确认，但钱确实转出去了）",
+                        "danger" if lost else "warn", lost=lost))
+    return {"defense": True, "trace": trace, "lost": lost, "blocked": False,
             "final_level": decision.level.value}
 
 
