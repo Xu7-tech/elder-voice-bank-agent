@@ -202,7 +202,7 @@ def slide_cover(prs):
     rect(s, 0, 0, SW, SH, fill=NAVY)
     rect(s, 0, 4.62, SW, 0.06, fill=BLUE)
     text(s, M + 0.2, 1.5, CW - 0.4, 1.0,
-         [("老年人「语音数字银行管家」", 44, True, WHITE)])
+         [("银龄暖声", 48, True, WHITE)])
     text(s, M + 0.2, 2.62, CW - 0.4, 0.5,
          [("语音优先交互 · 权限分级机制 · 幻觉与注入双防御", 19, False,
            RGBColor(0xCF, 0xE0, 0xF8))])
@@ -212,7 +212,7 @@ def slide_cover(prs):
     text(s, M + 0.2, 5.05, CW - 0.4, 1.6,
          [("赛题方向：构建 AI Banking Agent 系统，基于自然语言对话理解用户金融意图，自主规划、执行银行业务操作",
            13, False, RGBColor(0xB9, 0xCF, 0xEE), 0),
-          ("6 大业务场景全覆盖　·　可运行 Demo + 技术方案　·　12 条诈骗话术攻防对比", 13,
+          ("6 大业务场景全覆盖　·　可运行 Demo + 技术方案　·　13 条诈骗话术攻防对比", 13,
            False, RGBColor(0xB9, 0xCF, 0xEE), 8),
           ("团队：______________　　答辩人：____________　　日期：____________",
            12, False, RGBColor(0x8F, 0xA6, 0xC8), 26)])
@@ -352,7 +352,7 @@ def slide_demo3(prs):
 
 def slide_demo4(prs):
     s = blank(prs)
-    header(s, "场景演示 ④  攻防演示台：12 条诈骗剧本对比", "建议录屏，效果远好于静态图", 9)
+    header(s, "场景演示 ④  攻防演示台：13 条诈骗剧本对比", "建议录屏，效果远好于静态图", 9)
     placeholder(
         s, M, 1.15, CW, 3.1, 6,
         "攻防演示台：左屏「无防御」资金被转走，右屏「有防御」L3 阻断、资金零损失",
@@ -365,7 +365,7 @@ def slide_demo4(prs):
     card(s, M, 5.15, CW, 1.45, "为什么这组对比有说服力",
          ["两侧使用同一套剧本、同一套意图解析，唯一差别是有没有规则引擎与注入防御",
           "两侧银行状态互相隔离，演出结束后账户余额自动还原，可反复演示",
-          "12 条剧本覆盖话术注入 8 条、上下文注入 2 条、行为异常 2 条"],
+          "13 条剧本覆盖话术注入 8 条、上下文注入 2 条、行为异常 2 条、语义反诈 1 条"],
          fill=RED_WASH, accent=RED)
     notes(s, "ATK-09 是最强的一幕：备注里的指令被当成数据丢弃，而不是当成命令执行。")
 
@@ -471,7 +471,8 @@ def slide_metrics(prs):
         ["注入防御守住率", f"{d['containment_rate']}%（{d['contained']}/{d['scripts']}）",
          "L3 直接阻断或升权转授权"],
         ["防御侧资金零损失率", f"{d['zero_loss_rate']}%",
-         f"12 条剧本合计损失由 {d['attack_total_loss']:.0f} 元降至 {d['defended_total_loss']:.0f} 元"],
+         f"{d['scripts']} 条剧本合计损失由 {d['attack_total_loss']:.0f} 元降至 "
+         f"{d['defended_total_loss']:.0f} 元"],
         ["幻觉参数拦截准确率", f"{h['overall']}%（{h['hit']}/{h['total']}）",
          "模型输出 vs 用户原话"],
         ["授权票据安全项通过率", f"{t['overall']}%（{t['hit']}/{t['total']}）",

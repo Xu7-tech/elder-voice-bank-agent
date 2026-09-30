@@ -342,13 +342,17 @@ async function loadStatus() {
     // 这个胶囊说明的是「意图理解走哪条路」，不是「系统是不是 AI」——
     // 未配置模型时走的是同样在架构里的本地规则解析器，且离线也能完整演示。
     const pill = $("statusPill");
-    pill.textContent = s.llm_live
-      ? `意图理解：${s.llm_model}`
-      : "意图理解：本地规则解析 · 离线可跑";
-    pill.className = "pill " + (s.llm_live ? "ok" : "warn");
+    const llmBroken = s.llm_live && s.llm_last_error;
+    pill.textContent = llmBroken
+      ? `意图理解：${s.llm_model}（连接异常，已回落本地）`
+      : s.llm_live
+        ? `意图理解：${s.llm_model}`
+        : "意图理解：本地规则解析 · 离线可跑";
+    pill.className = "pill " + (llmBroken ? "danger" : s.llm_live ? "ok" : "warn");
     pill.title = s.llm_live
       ? `大模型已接入：意图理解走 ${s.llm_model}（${s.llm_base_url}），`
         + "槽位仍由系统从原话抽取，模型改不了金额与收款人"
+        + (s.llm_last_error ? `。最近一次调用失败：${s.llm_last_error}` : "")
       : "未配置 LLM_API_KEY，意图理解走本地规则解析器。配置后自动切换到云端大模型，"
         + "详见 README「AI 能力与模型接入」一节。";
     $("freeLimit").value = s.limits.free_limit;

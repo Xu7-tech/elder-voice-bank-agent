@@ -13,7 +13,7 @@ from .schemas import (AsrRequest, AttackRequest, AuthApproveRequest, ConfirmRequ
                       DeployPlanRequest, EmergencyRequest, ExecuteRequest, PlanRequest,
                       RiskRequest, SubscriptionCancelRequest, TtsRequest)
 
-app = FastAPI(title="老年人语音数字银行管家", version="1.0.0",
+app = FastAPI(title="银龄暖声 · 语音数字银行管家", version="1.0.0",
               description="语音优先交互 + 权限分级 + 幻觉/注入双防御的适老银行智能体")
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"],
                    allow_headers=["*"])

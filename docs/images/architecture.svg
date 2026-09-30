@@ -14,7 +14,7 @@
   <rect width="1160" height="700" fill="#f7f9fc"/>
   <rect x="0" y="0" width="1160" height="58" fill="url(#titleBg)"/>
   <text x="28" y="37" fill="#ffffff" font-size="21" font-weight="700">
-    老年人语音数字银行管家 · 系统架构
+    银龄暖声 · 语音数字银行管家 · 系统架构
   </text>
   <text x="1132" y="36" fill="#cfe0f8" font-size="13" text-anchor="end">
     权限分级由规则引擎独占裁定 · LLM 无资金接口调用权

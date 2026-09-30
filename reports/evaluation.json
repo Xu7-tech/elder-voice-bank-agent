@@ -1,5 +1,5 @@
 {
-  "generated_at": "2026-09-30T00:16:57",
+  "generated_at": "2026-09-30T21:58:51",
   "environment": {
     "llm": "deepseek-chat（https://api.deepseek.com/v1）",
     "asr": "browser-native-stt",
@@ -390,9 +390,9 @@
   },
   "latency": {
     "rounds": 200,
-    "p50_ms": 0.068,
-    "p95_ms": 0.134,
-    "max_ms": 1219.509,
+    "p50_ms": 0.143,
+    "p95_ms": 0.268,
+    "max_ms": 1232.288,
     "note": "当前为降级模式（确定性规则解析器）的本地耗时；接入云端 LLM 后该指标由网络与模型延迟主导。"
   },
   "scenario_coverage": {
@@ -461,5 +461,5 @@
     }
   },
   "scenario_coverage_rate": 100.0,
-  "elapsed_seconds": 90.9
+  "elapsed_seconds": 115.12
 }

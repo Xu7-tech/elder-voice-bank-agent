@@ -425,7 +425,7 @@ def to_markdown(r: dict) -> str:
         lines.append(f"| {c['utterance']} | {c['expected']} | {c['actual']} | "
                      f"{'通过' if c['pass'] else '不通过'} |")
 
-    lines += ["", "## 四、注入防御对比（12 条剧本）", "",
+    lines += ["", f"## 四、注入防御对比（{len(r['injection_defense']['cases'])} 条剧本）", "",
               "| 编号 | 剧本 | 类型 | 无防御损失 | 有防御判定 | 是否有防御阻断 | 有防御损失 |",
               "|---|---|---|---|---|---|---|"]
     for c in r["injection_defense"]["cases"]:
@@ -498,7 +498,7 @@ def main() -> None:
     f, d = result["false_positive"], result["injection_defense"]
     h, t = result["hallucination_guard"], result["auth_ticket_security"]
     print("=" * 62)
-    print("  老年人语音数字银行管家 · 评测结果")
+    print("  银龄暖声 · 语音数字银行管家 · 评测结果")
     print("=" * 62)
     print(f"  意图理解准确率        {i['overall']:>6}%   ({i['hit']}/{i['total']})")
     print(f"  权限分级准确率        {p['overall']:>6}%   ({p['hit']}/{p['total']})")
