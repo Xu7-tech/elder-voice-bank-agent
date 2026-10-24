@@ -152,6 +152,16 @@ button { font-family: inherit; cursor: pointer; }
 .chips .ghost.loading { opacity: .65; cursor: progress; }
 
 .response-text { font-size: 1.18em; line-height: 1.85; }
+.risk-evidence {
+  border-left: 5px solid var(--warn);
+  background: var(--warn-bg);
+  color: var(--ink-2);
+  border-radius: 10px;
+  padding: 10px 14px;
+  font-size: .9em;
+}
+.risk-evidence strong { color: var(--warn); }
+.risk-evidence ul { margin: 5px 0 0; padding-left: 20px; }
 .response-actions { display: flex; gap: 12px; flex-wrap: wrap; }
 .options { display: flex; flex-direction: column; gap: 12px; }
 .option-btn {

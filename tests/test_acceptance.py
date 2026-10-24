@@ -869,6 +869,18 @@ class AuditCase(unittest.TestCase):
         notes = " ".join(e.note for e in agent.AUDIT)
         self.assertIn("L3", notes)
 
+    def test_behavior_evidence_is_audited(self):
+        bank.TRANSACTIONS.extend([
+            {"id": "AUDIT-B001", "date": bank.today(), "time": "10:00", "amount": 100.0,
+             "direction": "out", "counterparty": "李建国", "category": "转账"},
+            {"id": "AUDIT-B002", "date": bank.today(), "time": "10:05", "amount": 120.0,
+             "direction": "out", "counterparty": "李建国", "category": "转账"},
+        ])
+        payload = agent.create_session(PlanRequest(text="给老李转一千块"))
+        risk_entries = [e for e in agent.AUDIT if e.stage == "risk"]
+        self.assertTrue(payload["risk"]["evidence"])
+        self.assertEqual(risk_entries[-1].detail["evidence"], payload["risk"]["evidence"])
+
     def test_audit_is_serializable(self):
         agent.create_session(PlanRequest(text="给老李转五十块"))
         dumped = [e.model_dump(mode="json") for e in agent.AUDIT]
@@ -915,6 +927,14 @@ class FrontendStaticCase(unittest.TestCase):
         block = css.split(".chips .ghost.active")[1].split("}")[0]
         self.assertIn("background", block)
         self.assertIn("--brand-dark", block)
+
+    def test_risk_evidence_has_a_visible_card(self):
+        html = (ROOT / "frontend" / "index.html").read_text(encoding="utf-8")
+        css = (ROOT / "frontend" / "styles.css").read_text(encoding="utf-8")
+        js = (ROOT / "frontend" / "app.js").read_text(encoding="utf-8")
+        self.assertIn('id="riskEvidence"', html)
+        self.assertIn(".risk-evidence", css)
+        self.assertIn("renderRiskEvidence", js)
 
 
 class FakeLLMMixin:

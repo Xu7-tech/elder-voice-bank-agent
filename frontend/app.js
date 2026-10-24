@@ -156,6 +156,7 @@ function renderResponse(p) {
   badge.textContent = level ? `权限等级 ${level}` : "待补充信息";
   badge.className = "badge" + (level ? " " + level : "");
   $("responseText").textContent = p.elder_text;
+  renderRiskEvidence(p.risk);
 
   const actions = $("responseActions");
   actions.innerHTML = "";
@@ -201,6 +202,33 @@ function renderResponse(p) {
     }
     addBtn(actions, "算了，先不办", "ghost", () => { $("responseCard").hidden = true; });
   }
+}
+
+function renderRiskEvidence(risk) {
+  const host = $("riskEvidence");
+  host.replaceChildren();
+  const evidence = (risk && risk.evidence) || [];
+  if (!evidence.length) {
+    host.hidden = true;
+    return;
+  }
+  const title = document.createElement("strong");
+  title.textContent = "行为风控依据";
+  host.appendChild(title);
+  const list = document.createElement("ul");
+  evidence.forEach((item) => {
+    const row = document.createElement("li");
+    if (item.type === "amount_spike") {
+      row.textContent = `向${item.payee}本次转账金额是历史平均的 ${item.multiplier} 倍（历史平均 ¥${Number(item.historical_average).toFixed(2)}）`;
+    } else if (item.type === "same_day_burst") {
+      row.textContent = `${item.date} 已向${item.payee}转账 ${item.count} 笔，触发重复付款提醒`;
+    } else {
+      row.textContent = "检测到一项需要复核的账户行为";
+    }
+    list.appendChild(row);
+  });
+  host.appendChild(list);
+  host.hidden = false;
 }
 
 function addBtn(host, label, cls, fn) {

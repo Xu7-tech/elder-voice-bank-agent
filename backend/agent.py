@@ -459,7 +459,7 @@ def create_session(req) -> dict:
     SESSIONS[session_id] = session
     audit("risk", "rule-engine", f"判定 {decision.level.value}",
           reasons=decision.reasons, blocked=decision.blocked,
-          injection_hits=decision.injection_hits)
+          injection_hits=decision.injection_hits, evidence=decision.evidence)
 
     if decision.blocked:
         session["status"] = "blocked"
