@@ -298,14 +298,16 @@ INTENT_RULES: list[tuple[str, tuple[str, ...]]] = [
     ("subscription_cancel", ("取消订阅", "取消訂閱", "退订", "退訂", "取消自动续费",
                              "唔要呢个", "唔要呢個", "取消扣费", "别扣了", "唔好再扣")),
     ("card_switch", ("关掉", "關掉", "关闭", "關閉", "打开", "打開", "锁定交易", "解锁",
+                     "锁住", "鎖住",
                      "境外交易", "境外", "安全锁", "安全鎖", "锁上", "鎖上")),
-    ("wealth_redeem", ("赎回", "贖回", "取出来", "全部取", "卖出", "賣出", "取钱", "攞返")),
+    ("wealth_redeem", ("赎回", "贖回", "取出来", "全部取", "卖出", "賣出",
+                       "卖掉", "賣掉", "取钱", "攞返")),
     ("wealth_purchase", ("买", "買", "理财", "理財", "申购", "申購", "存定期", "存钱",
                          "稳当", "稳阵", "穩陣", "稳健", "穩健", "投资", "投資")),
     ("transfer", ("转账", "轉賬", "转钱", "汇款", "匯款", "打钱", "打錢", "转", "轉",
                   "過數", "过数", "轉數", "转数", "畀", "交学费", "缴物业费")),
     ("subscription_scan", ("订阅", "訂閱", "自动续费", "自動續費", "续费", "續費",
-                           "扣费", "扣費", "乱扣", "亂扣", "代扣")),
+                           "扣费", "扣費", "扣款", "亂扣", "乱扣", "代扣")),
     ("bill_analysis", ("账单", "賬單", "帳單", "流水", "花了", "花哪", "用咗",
                        "消费统计", "消費", "查账", "查帳", "查單", "查单", "开支")),
     ("calendar_query", ("日历", "日曆", "提醒", "日程", "安排", "生日", "缴费日", "复诊",
@@ -346,6 +348,12 @@ def parse_intent_rule(text: str, dialect: str) -> Intent:
                       slots={"alias_hits": aliases, "payee_hits": names, "want_cancel": True,
                              "rule_source": "structural"},
                       confidence=0.8, raw_utterance=text, dialect=dialect, source="rule")
+    if ("有人催" in haystack or "催我" in haystack) and any(
+            phrase in haystack for phrase in ("先别转", "先別轉", "别转", "別轉", "不要转", "不要轉")):
+        return Intent(name="emergency_stop",
+                      slots={"alias_hits": aliases, "payee_hits": names,
+                             "rule_source": "structural"},
+                      confidence=0.9, raw_utterance=text, dialect=dialect, source="rule")
     guard_target = guard_run_target(haystack)
     if guard_target is not None:
         return Intent(name="guard_run",
@@ -582,6 +590,15 @@ def parse_intents(text: str, dialect_pref: str = "auto") -> tuple[list[Intent], 
                                for r in (data.get("intents") or []) if isinstance(r, dict)) if i]
     if rule_intent.name != "unknown":
         llm_names = [i.name for i in llm_intents]
+        # 订阅/扣费与守护日历是比账单分析更具体的业务意图。
+        # 模型容易把“扣款查询”“最近有什么安排”泛化成 bill_analysis；
+        # 只要规则已命中特定意图且模型没有同名结果，就保留规则判定。
+        if rule_intent.name in {"subscription_scan", "calendar_query"} \
+                and rule_intent.name not in llm_names:
+            rule_intent.slots["arbitration"] = (
+                f"特定规则判定 {rule_intent.name}，模型判成 {llm_names or '空'}，"
+                "采用规则结果")
+            return [rule_intent], signal
         # 结构性规则匹配的是整句句式（"每个月…转…"、"…卡"），比关键词精确得多：
         # 模型没提到它时，以规则为准 —— 否则"每个月1号转五百"会被压成一次性转账。
         if rule_intent.slots.get("rule_source") == "structural" and rule_intent.name not in llm_names:

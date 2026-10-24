@@ -459,7 +459,7 @@ def create_session(req) -> dict:
     SESSIONS[session_id] = session
     audit("risk", "rule-engine", f"判定 {decision.level.value}",
           reasons=decision.reasons, blocked=decision.blocked,
-          injection_hits=decision.injection_hits)
+          injection_hits=decision.injection_hits, evidence=decision.evidence)
 
     if decision.blocked:
         session["status"] = "blocked"
@@ -499,7 +499,9 @@ def _evaluate_plan(session: dict, req) -> RiskDecision:
         return worst
     return RiskDecision(level=worst.level, blocked=worst.blocked,
                         reasons=[r for d in decisions for r in d.reasons],
-                        limits=worst.limits, injection_hits=worst.injection_hits)
+                        limits=worst.limits,
+                        injection_hits=worst.injection_hits,
+                        evidence=[e for d in decisions for e in d.evidence])
 
 
 def _evaluate_step(step: PlanStep, req, utterance: str, llm_signal: dict | None) -> RiskDecision:
@@ -786,7 +788,14 @@ def expire_stale_tickets() -> None:
 
 def _scoped_transactions(period: str) -> list[dict]:
     now = datetime.now()
-    key = now.strftime("%Y-%m") if period == "month" else now.strftime("%Y")
+    if period == "month":
+        key = now.strftime("%Y-%m")
+        scoped = [t for t in bank.TRANSACTIONS if t["date"].startswith(key)]
+        if not scoped and bank.TRANSACTIONS:
+            latest = max(t["date"] for t in bank.TRANSACTIONS)
+            key = latest[:7]
+    else:
+        key = now.strftime("%Y")
     return [t for t in bank.TRANSACTIONS if t["date"].startswith(key)]
 
 
