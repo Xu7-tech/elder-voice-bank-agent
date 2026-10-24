@@ -103,6 +103,17 @@ class IntentCase(unittest.TestCase):
         self.assertEqual(payload["status"], "clarify")
         self.assertIn("多少钱", payload["elder_text"])
 
+    def test_holdout_phrases_keep_action_direction(self):
+        cases = [
+            ("把我买的理财卖掉", "wealth_redeem"),
+            ("我想把卡先锁住", "card_switch"),
+            ("有人催我马上转钱，先别转", "emergency_stop"),
+            ("我不认识这笔扣款，帮我查查", "subscription_scan"),
+        ]
+        for text, expected in cases:
+            with self.subTest(text=text):
+                self.assertEqual(nlu.parse_intent_rule(text, "mandarin").name, expected)
+
 
 class CantoneseCase(unittest.TestCase):
     """粤语识别：归一化后的句式变化样本（繁简混排，模拟真实转写结果）。"""
@@ -201,6 +212,44 @@ class PermissionCase(unittest.TestCase):
         self.assertEqual(self.level("给安全账户转一百块"), RiskLevel.L3)
         self.assertEqual(self.level("给陈志强转一千块"), RiskLevel.L3)
         self.assertEqual(self.level("给老李转九万块"), RiskLevel.L3)            # 超余额
+
+    def test_behavior_amount_spike_escalates_to_l2(self):
+        bank.TRANSACTIONS.extend([
+            {"id": "B001", "date": bank.today(), "time": "10:00", "amount": 100.0,
+             "direction": "out", "counterparty": "李建国", "category": "转账"},
+            {"id": "B002", "date": bank.today(), "time": "10:05", "amount": 120.0,
+             "direction": "out", "counterparty": "李建国", "category": "转账"},
+        ])
+        decision = risk.evaluate(amount=1000, payee="李建国", hour=10,
+                                 utterance="给老李转一千块")
+        self.assertEqual(decision.level, RiskLevel.L2)
+        self.assertTrue(any(e["type"] == "amount_spike" for e in decision.evidence))
+
+    def test_behavior_burst_escalates_to_l2(self):
+        bank.TRANSACTIONS.extend([
+            {"id": "B003", "date": bank.today(), "time": "10:00", "amount": 50.0,
+             "direction": "out", "counterparty": "李建国", "category": "转账"},
+            {"id": "B004", "date": bank.today(), "time": "10:05", "amount": 50.0,
+             "direction": "out", "counterparty": "李建国", "category": "转账"},
+            {"id": "B005", "date": bank.today(), "time": "10:10", "amount": 50.0,
+             "direction": "out", "counterparty": "李建国", "category": "转账"},
+        ])
+        decision = risk.evaluate(amount=50, payee="李建国", hour=10,
+                                 utterance="给老李转五十块")
+        self.assertEqual(decision.level, RiskLevel.L2)
+        self.assertTrue(any(e["type"] == "same_day_burst" for e in decision.evidence))
+
+    def test_behavior_signals_are_disabled_with_defense(self):
+        bank.TRANSACTIONS.extend([
+            {"id": "B006", "date": bank.today(), "time": "10:00", "amount": 100.0,
+             "direction": "out", "counterparty": "李建国", "category": "转账"},
+            {"id": "B007", "date": bank.today(), "time": "10:05", "amount": 100.0,
+             "direction": "out", "counterparty": "李建国", "category": "转账"},
+        ])
+        decision = risk.evaluate(amount=1000, payee="李建国", hour=10,
+                                 utterance="给老李转一千块", defense_enabled=False)
+        self.assertEqual(decision.level, RiskLevel.L1)
+        self.assertFalse(decision.evidence)            # 超余额
 
     def test_emergency_stop_blocks_every_transfer(self):
         agent.emergency_stop("用户触发紧急止付暗语")

@@ -1,5 +1,5 @@
 {
-  "generated_at": "2026-09-29T22:53:45",
+  "generated_at": "2026-10-24T22:45:19",
   "environment": {
     "llm": "rule-engine-fallback",
     "asr": "browser-native-stt",
@@ -340,6 +340,99 @@
       }
     ]
   },
+  "generalization_holdout": {
+    "llm_live": false,
+    "total": 12,
+    "rule_only_accuracy": 41.7,
+    "with_llm_accuracy": null,
+    "note": "扩展表达观察集，不并入主意图准确率；不是外部真实用户盲测。",
+    "cases": [
+      {
+        "utterance": "我想给老李意思一下五百",
+        "expected": "transfer",
+        "rule_only": "unknown",
+        "final": "unknown",
+        "pass": false
+      },
+      {
+        "utterance": "闺女手头紧，我给她凑两千",
+        "expected": "transfer",
+        "rule_only": "unknown",
+        "final": "unknown",
+        "pass": false
+      },
+      {
+        "utterance": "上个月有没有多扣我的钱",
+        "expected": "subscription_scan",
+        "rule_only": "unknown",
+        "final": "unknown",
+        "pass": false
+      },
+      {
+        "utterance": "帮我看看最近的花销",
+        "expected": "bill_analysis",
+        "rule_only": "unknown",
+        "final": "unknown",
+        "pass": false
+      },
+      {
+        "utterance": "我想把卡先锁住",
+        "expected": "card_switch",
+        "rule_only": "card_switch",
+        "final": "card_switch",
+        "pass": true
+      },
+      {
+        "utterance": "给孙子发个红包三百",
+        "expected": "transfer",
+        "rule_only": "unknown",
+        "final": "unknown",
+        "pass": false
+      },
+      {
+        "utterance": "下个月开始每月给儿子打一千",
+        "expected": "transfer_schedule",
+        "rule_only": "transfer_schedule",
+        "final": "transfer_schedule",
+        "pass": true
+      },
+      {
+        "utterance": "我不认识这笔扣款，帮我查查",
+        "expected": "subscription_scan",
+        "rule_only": "subscription_scan",
+        "final": "subscription_scan",
+        "pass": true
+      },
+      {
+        "utterance": "把我买的理财卖掉",
+        "expected": "wealth_redeem",
+        "rule_only": "wealth_redeem",
+        "final": "wealth_redeem",
+        "pass": true
+      },
+      {
+        "utterance": "我想办张普通银行卡",
+        "expected": "card_apply",
+        "rule_only": "unknown",
+        "final": "unknown",
+        "pass": false
+      },
+      {
+        "utterance": "最近要交什么费用",
+        "expected": "calendar_query",
+        "rule_only": "unknown",
+        "final": "unknown",
+        "pass": false
+      },
+      {
+        "utterance": "有人催我马上转钱，先别转",
+        "expected": "emergency_stop",
+        "rule_only": "emergency_stop",
+        "final": "emergency_stop",
+        "pass": true
+      }
+    ]
+  },
   "auth_ticket_security": {
     "overall": 100.0,
     "hit": 8,
@@ -387,9 +480,9 @@
   },
   "latency": {
     "rounds": 200,
-    "p50_ms": 0.057,
-    "p95_ms": 0.101,
-    "max_ms": 0.296,
+    "p50_ms": 0.087,
+    "p95_ms": 0.14,
+    "max_ms": 0.732,
     "note": "当前为降级模式（确定性规则解析器）的本地耗时；接入云端 LLM 后该指标由网络与模型延迟主导。"
   },
   "scenario_coverage": {
@@ -458,5 +551,5 @@
     }
   },
   "scenario_coverage_rate": 100.0,
-  "elapsed_seconds": 0.03
+  "elapsed_seconds": 0.04
 }

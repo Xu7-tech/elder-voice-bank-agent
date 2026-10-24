@@ -45,6 +45,7 @@ class RiskDecision(BaseModel):
     limits: dict[str, Any] = Field(default_factory=dict)
     blocked: bool = False
     injection_hits: list[str] = Field(default_factory=list)
+    evidence: list[dict[str, Any]] = Field(default_factory=list)
 
 
 class AuthTicket(BaseModel):
