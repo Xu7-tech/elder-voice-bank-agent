@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import itertools
 import re
+import threading
 import uuid
 from datetime import datetime, timedelta
 
@@ -22,6 +23,7 @@ NOTIFICATIONS: list[dict] = []
 WS_CLIENTS: list = []                 # 由 main.py 注册的 WebSocket 连接
 NOTIFIED_SESSIONS: set[str] = set()   # 已推送过执行通知的会话，避免重复推送
 _SEQ = itertools.count(1)
+_STATE_LOCK = threading.RLock()
 
 # 这些动作不会拦下老人，但子女应当知情 —— 执行后主动推送到子女端
 CHILD_NOTIFY_TOOLS = {
@@ -529,6 +531,11 @@ READ_ONLY_TOOLS = {"bank.balance", "bank.bill_report", "subscription.list", "gua
 
 
 def confirm(session_id: str, req) -> dict:
+    with _STATE_LOCK:
+        return _confirm_locked(session_id, req)
+
+
+def _confirm_locked(session_id: str, req) -> dict:
     session = SESSIONS.get(session_id)
     if session is None:
         return {"error": "会话不存在或已过期"}
@@ -579,37 +586,50 @@ def confirm(session_id: str, req) -> dict:
 
 
 def execute(session_id: str) -> dict:
-    session = SESSIONS.get(session_id)
-    if session is None:
-        return {"error": "会话不存在或已过期"}
-    if session["status"] == "executed":
-        return _session_payload(session)
-    if session["status"] == "blocked":
-        return {"error": "该会话已被风控阻断", "session": _session_payload(session)}
-    if session["status"] == "pending_auth":
-        ticket = TICKETS.get(session["ticket_id"] or "")
-        if ticket is None:
-            return {"error": "找不到对应的授权票据"}
-        if ticket.status == "expired":
-            return {"error": "授权票据已超时作废，请重新发起"}
-        if ticket.status == "used":
-            return {"error": "授权票据已被使用，不可重放"}
-        if ticket.status != "approved":
-            return {"error": "尚未获得子女授权"}
-        step = session["plan"].steps[0]
-        # 票据绑定金额与收款人，参数不符即拒绝执行。
-        if abs(ticket.amount - step.params.get("amount", -1)) > 0.001 or \
-                ticket.payee != step.params.get("payee"):
-            return {"error": "票据绑定的金额或收款人与本次操作不一致"}
-        ticket.status = "used"
-        ticket.used_at = datetime.now()
-        audit("auth", "system", f"校验授权票据 {ticket.id} 通过并核销", ticket=ticket.model_dump(mode="json"))
-    elif session["status"] != "pending_confirm":
-        return {"error": f"当前状态 {session['status']} 不可执行"}
-    return _finalize(session)
+    with _STATE_LOCK:
+        session = SESSIONS.get(session_id)
+        if session is None:
+            return {"error": "会话不存在或已过期"}
+        if session["status"] == "executed":
+            audit("execute", "system", f"幂等返回已完成会话 {session_id}")
+            return _session_payload(session)
+        if session["status"] == "blocked":
+            return {"error": "该会话已被风控阻断", "session": _session_payload(session)}
+        if session["status"] == "pending_auth":
+            ticket = TICKETS.get(session["ticket_id"] or "")
+            if ticket is None:
+                return {"error": "找不到对应的授权票据"}
+            if ticket.status == "expired":
+                return {"error": "授权票据已超时作废，请重新发起"}
+            if ticket.status == "used":
+                return {"error": "授权票据已被使用，不可重放"}
+            if ticket.status != "approved":
+                return {"error": "尚未获得子女授权"}
+            step = session["plan"].steps[0]
+            # 票据绑定金额与收款人，参数不符即拒绝执行。
+            if abs(ticket.amount - step.params.get("amount", -1)) > 0.001 or \
+                    ticket.payee != step.params.get("payee"):
+                return {"error": "票据绑定的金额或收款人与本次操作不一致"}
+            funds_error = _funds_error(session)
+            if funds_error:
+                audit("execute", "bank-core", funds_error,
+                      balance=bank.ACCOUNTS["E001"]["balance"])
+                return {"error": funds_error, "session": _session_payload(session)}
+            ticket.status = "used"
+            ticket.used_at = datetime.now()
+            audit("auth", "system", f"校验授权票据 {ticket.id} 通过并核销",
+                  ticket=ticket.model_dump(mode="json"))
+        elif session["status"] != "pending_confirm":
+            return {"error": f"当前状态 {session['status']} 不可执行"}
+        return _finalize(session)
 
 
 def _finalize(session: dict) -> dict:
+    funds_error = _funds_error(session)
+    if funds_error:
+        audit("execute", "bank-core", funds_error,
+              balance=bank.ACCOUNTS["E001"]["balance"])
+        return {"error": funds_error, "session": _session_payload(session)}
     results = []
     for step in session["plan"].steps:
         outcome = _execute_step(step, session)
@@ -618,6 +638,15 @@ def _finalize(session: dict) -> dict:
     session["status"] = "executed"
     session["result"] = {"steps": results}
     return _session_payload(session)
+
+
+def _funds_error(session: dict) -> str | None:
+    for step in session["plan"].steps:
+        amount = float(step.params.get("amount", 0.0))
+        if step.tool in ("transfer.execute", "wealth.purchase") and \
+                amount > bank.ACCOUNTS["E001"]["balance"]:
+            return f"执行前复核失败：当前余额不足以支付 {money(amount)} 元"
+    return None
 
 
 def _execute_step(step: PlanStep, session: dict) -> dict:
@@ -746,32 +775,34 @@ def create_ticket(session: dict) -> AuthTicket:
 
 
 def approve_ticket(req) -> dict:
-    ticket = TICKETS.get(req.ticket_id)
-    if ticket is None:
-        return {"error": "票据不存在"}
-    if ticket.status != "pending":
-        return {"error": f"票据当前状态为 {ticket.status}，不可重复审批"}
-    if datetime.now() > ticket.expires_at:
-        ticket.status = "expired"
-        return {"error": "票据已超时作废"}
-    if not req.approve:
-        ticket.status = "rejected"
+    with _STATE_LOCK:
+        ticket = TICKETS.get(req.ticket_id)
+        if ticket is None:
+            return {"error": "票据不存在"}
+        if ticket.status != "pending":
+            return {"error": f"票据当前状态为 {ticket.status}，不可重复审批"}
+        if datetime.now() > ticket.expires_at:
+            ticket.status = "expired"
+            return {"error": "票据已超时作废"}
+        if not req.approve:
+            ticket.status = "rejected"
+            ticket.approver = req.approver
+            audit("auth", req.approver, f"子女拒绝了票据 {ticket.id}",
+                  ticket=ticket.model_dump(mode="json"))
+            return {"ticket": ticket.model_dump(mode="json"), "reason": "已拒绝"}
+        # 子女可以下调金额与收紧有效期，但不能放宽到超出原始请求。
+        if req.amount is not None and req.amount > ticket.amount:
+            return {"error": "子女端不可上调金额，只能维持或下调"}
+        if req.amount is not None:
+            ticket.amount = req.amount
+        if req.payee is not None and req.payee != ticket.payee:
+            return {"error": "收款人不可变更，只能维持原收款人"}
+        ticket.status = "approved"
         ticket.approver = req.approver
-        audit("auth", req.approver, f"子女拒绝了票据 {ticket.id}", ticket=ticket.model_dump(mode="json"))
-        return {"ticket": ticket.model_dump(mode="json"), "reason": "已拒绝"}
-    # 子女可以下调金额与收紧有效期，但不能放宽到超出原始请求。
-    if req.amount is not None and req.amount > ticket.amount:
-        return {"error": "子女端不可上调金额，只能维持或下调"}
-    if req.amount is not None:
-        ticket.amount = req.amount
-    if req.payee is not None and req.payee != ticket.payee:
-        return {"error": "收款人不可变更，只能维持原收款人"}
-    ticket.status = "approved"
-    ticket.approver = req.approver
-    ticket.expires_at = datetime.now() + timedelta(seconds=req.ttl_seconds)
-    audit("auth", req.approver, f"子女授权通过 {ticket.id}（有效期 {req.ttl_seconds} 秒）",
-          ticket=ticket.model_dump(mode="json"))
-    return {"ticket": ticket.model_dump(mode="json"), "reason": "已授权"}
+        ticket.expires_at = datetime.now() + timedelta(seconds=req.ttl_seconds)
+        audit("auth", req.approver, f"子女授权通过 {ticket.id}（有效期 {req.ttl_seconds} 秒）",
+              ticket=ticket.model_dump(mode="json"))
+        return {"ticket": ticket.model_dump(mode="json"), "reason": "已授权"}
 
 
 def expire_stale_tickets() -> None:

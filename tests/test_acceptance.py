@@ -9,6 +9,7 @@ import json
 import pathlib
 import re
 import sys
+import threading
 import unittest
 from datetime import datetime, timedelta
 
@@ -356,6 +357,41 @@ class AuthTicketCase(unittest.TestCase):
         self.assertEqual(ok["ticket"]["amount"], 1000.0)
         # 票据金额被下调后，与原始执行参数不一致，执行必须被拒绝
         self.assertIn("不一致", agent.execute(self.sid)["error"])
+
+    def test_execute_is_idempotent(self):
+        agent.approve_ticket(AuthApproveRequest(ticket_id=self.ticket_id, approver="张伟"))
+        first = agent.execute(self.sid)
+        balance = bank.ACCOUNTS["E001"]["balance"]
+        second = agent.execute(self.sid)
+        self.assertEqual(first["status"], "executed")
+        self.assertEqual(second["status"], "executed")
+        self.assertEqual(bank.ACCOUNTS["E001"]["balance"], balance)
+        tx_id = first["result"]["steps"][0]["tx"]["id"]
+        self.assertEqual(sum(t.get("id") == tx_id for t in bank.TRANSACTIONS), 1)
+
+    def test_concurrent_execute_can_only_debit_once(self):
+        agent.approve_ticket(AuthApproveRequest(ticket_id=self.ticket_id, approver="张伟"))
+        results = []
+        threads = [
+            threading.Thread(target=lambda: results.append(agent.execute(self.sid)))
+            for _ in range(4)
+        ]
+        for thread in threads:
+            thread.start()
+        for thread in threads:
+            thread.join()
+        self.assertEqual(len(results), 4)
+        self.assertTrue(all(result["status"] == "executed" for result in results))
+        transfers = [t for t in bank.TRANSACTIONS if t.get("counterparty") == "张敏"]
+        self.assertEqual(len(transfers), 1)
+
+    def test_execution_rechecks_balance_after_authorization(self):
+        agent.approve_ticket(AuthApproveRequest(ticket_id=self.ticket_id, approver="张伟"))
+        bank.ACCOUNTS["E001"]["balance"] = 100.0
+        result = agent.execute(self.sid)
+        self.assertIn("余额不足", result["error"])
+        self.assertEqual(agent.TICKETS[self.ticket_id].status, "approved")
+        self.assertEqual(bank.ACCOUNTS["E001"]["balance"], 100.0)
 
 
 class InjectionDefenseCase(unittest.TestCase):
