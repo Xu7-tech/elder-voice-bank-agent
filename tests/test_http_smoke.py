@@ -178,6 +178,9 @@ class HttpSmokeCase(unittest.TestCase):
         self.post("/agent/confirm", {"session_id": s["session_id"], "ack_voice": True})
         stages = {e["stage"] for e in self.get("/audit?limit=100")["entries"]}
         self.assertTrue({"intent", "plan", "risk", "confirm", "execute"} <= stages)
+        verification = self.get("/audit/verify")
+        self.assertTrue(verification["valid"])
+        self.assertGreaterEqual(verification["entries"], 5)
 
     def test_07_ticket_replay_is_rejected(self):
         self.post("/system/reset")

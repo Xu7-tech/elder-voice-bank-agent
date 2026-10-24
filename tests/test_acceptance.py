@@ -940,6 +940,23 @@ class AuditCase(unittest.TestCase):
         dumped = [e.model_dump(mode="json") for e in agent.AUDIT]
         self.assertTrue(dumped and "ts" in dumped[0])
 
+    def test_audit_chain_is_valid_and_detects_tampering(self):
+        agent.create_session(PlanRequest(text="给老李转五十块"))
+        checked = agent.verify_audit_chain()
+        self.assertTrue(checked["valid"])
+        self.assertGreater(checked["entries"], 0)
+        original = agent.AUDIT[0].note
+        agent.AUDIT[0].note = original + "（被篡改）"
+        tampered = agent.verify_audit_chain()
+        self.assertFalse(tampered["valid"])
+        agent.AUDIT[0].note = original
+
+    def test_audit_entries_have_chain_hashes(self):
+        agent.create_session(PlanRequest(text="给老李转五十块"))
+        self.assertTrue(agent.AUDIT[0].entry_hash)
+        if len(agent.AUDIT) > 1:
+            self.assertEqual(agent.AUDIT[1].prev_hash, agent.AUDIT[0].entry_hash)
+
 
 class FrontendStaticCase(unittest.TestCase):
     """前端静态一致性：JS 里引用的元素 id 必须真实存在。"""

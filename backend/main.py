@@ -340,6 +340,11 @@ def get_audit(limit: int = 100):
     return {"entries": [e.model_dump(mode="json") for e in agent.AUDIT[-limit:]]}
 
 
+@app.get("/audit/verify", tags=["审计"])
+def verify_audit():
+    return agent.verify_audit_chain()
+
+
 @app.get("/system/status", tags=["系统"])
 def system_status():
     llm_live = nlu.llm_available()

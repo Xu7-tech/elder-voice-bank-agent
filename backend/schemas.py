@@ -67,6 +67,8 @@ class AuditEntry(BaseModel):
     actor: str
     note: str = ""
     detail: dict[str, Any] = Field(default_factory=dict)
+    prev_hash: str = ""
+    entry_hash: str = ""
 
 
 class Subscription(BaseModel):
