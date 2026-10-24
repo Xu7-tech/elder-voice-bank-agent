@@ -61,6 +61,7 @@ python -m uvicorn backend.main:app --host 127.0.0.1 --port 8077
 | **资金风控** | 规则引擎 L0–L3（**刻意不使用模型**） | 同左 | `backend/risk.py::evaluate` |
 | **行为风控** | 历史金额跃升 / 当日重复付款证据 | 同左，模型不可降低等级 | `backend/risk.py::behavior_evidence` |
 | **关系特征专家** | 账户—收款人—设备—时间关系评分 | 只可解释性升权到 L2，不可触发 L3 | `backend/risk.py::relationship_expert` |
+| **审计完整性** | 审计记录前序哈希 + SHA-256 当前哈希 | `/audit/verify` 检测篡改和断链 | `backend/agent.py::verify_audit_chain` |
 | 语音识别 | 浏览器原生识别（Edge / Chrome，支持粤语） | 同左，另可通过 `/asr` 接口接云端 | `backend/voice.py::transcribe` |
 | 语音合成 | 浏览器语音合成 | **讯飞在线合成 TTS** | `backend/voice.py::_provider_tts` |
 

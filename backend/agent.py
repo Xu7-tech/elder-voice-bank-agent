@@ -8,6 +8,8 @@
 from __future__ import annotations
 
 import itertools
+import hashlib
+import json
 import re
 import threading
 import uuid
@@ -37,10 +39,42 @@ CHILD_NOTIFY_TOOLS = {
 
 
 def audit(stage: str, actor: str, note: str, **detail) -> AuditEntry:
-    entry = AuditEntry(ts=datetime.now(), stage=stage, actor=actor, note=note, detail=detail)
+    prev_hash = AUDIT[-1].entry_hash if AUDIT else ""
+    entry = AuditEntry(ts=datetime.now(), stage=stage, actor=actor, note=note,
+                       detail=detail, prev_hash=prev_hash)
+    entry.entry_hash = _audit_hash(entry)
     AUDIT.append(entry)
     del AUDIT[:-500]
     return entry
+
+
+def _audit_hash(entry: AuditEntry) -> str:
+    payload = {
+        "ts": entry.ts.isoformat(),
+        "stage": entry.stage,
+        "actor": entry.actor,
+        "note": entry.note,
+        "detail": entry.detail,
+        "prev_hash": entry.prev_hash,
+    }
+    canonical = json.dumps(payload, ensure_ascii=False, sort_keys=True,
+                            separators=(",", ":"), default=str)
+    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+
+
+def verify_audit_chain() -> dict:
+    """Verify the retained audit entries without mutating the audit log."""
+    if not AUDIT:
+        return {"valid": True, "entries": 0, "checked": 0, "error": None}
+    for index, entry in enumerate(AUDIT):
+        expected_prev = AUDIT[index - 1].entry_hash if index else entry.prev_hash
+        if entry.prev_hash != expected_prev:
+            return {"valid": False, "entries": len(AUDIT), "checked": index,
+                    "error": f"第 {index + 1} 条审计记录前序哈希不匹配"}
+        if entry.entry_hash != _audit_hash(entry):
+            return {"valid": False, "entries": len(AUDIT), "checked": index,
+                    "error": f"第 {index + 1} 条审计记录哈希不匹配"}
+    return {"valid": True, "entries": len(AUDIT), "checked": len(AUDIT), "error": None}
 
 
 def attach_ws(client) -> None:
