@@ -76,7 +76,17 @@ class HttpSmokeCase(unittest.TestCase):
                     self.assertEqual(r.status, 200)
                     self.assertIn(marker, r.read())
 
-    def test_02_status_reports_degraded_mode(self):
+    def test_02_risk_endpoint_returns_relationship_evidence(self):
+        self.post("/system/reset")
+        result = self.post("/risk/evaluate", {
+            "amount": 100, "payee": "李建国", "hour": 2,
+            "device_trusted": False, "utterance": "给老李转一百块",
+        })
+        expert = [e for e in result["evidence"] if e["type"] == "relationship_expert"]
+        self.assertTrue(expert)
+        self.assertGreaterEqual(expert[0]["score"], 0.4)
+
+    def test_03_status_reports_degraded_mode(self):
         self.post("/system/reset")
         status = self.get("/system/status")
         self.assertFalse(status["llm_live"])
@@ -90,7 +100,7 @@ class HttpSmokeCase(unittest.TestCase):
         # Web 界面实际走浏览器识别，与 /asr 接口可用的通道分开报告
         self.assertEqual(status["asr_in_use"], "browser-native-stt")
 
-    def test_03_voice_endpoints_fall_back(self):
+    def test_04_voice_endpoints_fall_back(self):
         asr = self.post("/asr", {"dialect": "cantonese"})
         self.assertEqual(asr["provider"], "offline-fallback")
         asr2 = self.post("/asr", {"dialect": "mandarin", "transcript_hint": "给老李转五十块"})

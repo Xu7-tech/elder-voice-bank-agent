@@ -222,6 +222,14 @@ function renderRiskEvidence(risk) {
       row.textContent = `向${item.payee}本次转账金额是历史平均的 ${item.multiplier} 倍（历史平均 ¥${Number(item.historical_average).toFixed(2)}）`;
     } else if (item.type === "same_day_burst") {
       row.textContent = `${item.date} 已向${item.payee}转账 ${item.count} 笔，触发重复付款提醒`;
+    } else if (item.type === "relationship_expert") {
+      const features = (item.features || []).map((feature) => ({
+        no_prior_payee_transfer: "此前没有向该收款人转账",
+        new_payee_relationship: `认识该收款人仅 ${feature.known_days} 天`,
+        inactive_time: `当前为 ${feature.hour} 点非活跃时段`,
+        untrusted_device: "本次使用未受信任设备",
+      }[feature.feature] || feature.feature)).join("；");
+      row.textContent = `关系风险评分 ${item.score.toFixed(2)}：${features}`;
     } else {
       row.textContent = "检测到一项需要复核的账户行为";
     }

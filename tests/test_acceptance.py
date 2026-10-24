@@ -251,6 +251,24 @@ class PermissionCase(unittest.TestCase):
         self.assertEqual(decision.level, RiskLevel.L1)
         self.assertFalse(decision.evidence)            # 超余额
 
+    def test_relationship_expert_combines_features_and_explains_them(self):
+        decision = risk.evaluate(
+            amount=100, payee="李建国", hour=2, device_trusted=False,
+            utterance="给老李转一百块")
+        self.assertEqual(decision.level, RiskLevel.L2)
+        expert = next(e for e in decision.evidence if e["type"] == "relationship_expert")
+        self.assertGreaterEqual(expert["score"], risk.RELATIONSHIP_EXPERT_THRESHOLD)
+        self.assertEqual(
+            {f["feature"] for f in expert["features"]},
+            {"no_prior_payee_transfer", "inactive_time", "untrusted_device"},
+        )
+
+    def test_relationship_expert_never_runs_when_defense_is_disabled(self):
+        decision = risk.evaluate(
+            amount=100, payee="李建国", hour=2, device_trusted=False,
+            utterance="给老李转一百块", defense_enabled=False)
+        self.assertFalse(decision.evidence)
+
     def test_emergency_stop_blocks_every_transfer(self):
         agent.emergency_stop("用户触发紧急止付暗语")
         payload = agent.create_session(PlanRequest(text="给老李转五十块", hour=10))

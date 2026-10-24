@@ -35,6 +35,7 @@ NEW_PAYEE_DAYS = 30
 AMOUNT_SPIKE_MULTIPLIER = 3.0
 AMOUNT_SPIKE_MINIMUM = 1000.0
 BURST_COUNT_THRESHOLD = 3
+RELATIONSHIP_EXPERT_THRESHOLD = 0.4
 
 
 def detect_fraud(text: str) -> list[str]:
@@ -99,6 +100,49 @@ def behavior_evidence(amount: float, payee: str) -> list[dict]:
     return evidence
 
 
+def relationship_expert(
+    *, payee: str, hour: int | None, device_trusted: bool
+) -> list[dict]:
+    """Combine account-payee-device-time features into an explainable score.
+
+    This is a deterministic hybrid-expert seam: each feature is independently
+    inspectable, while the score can only add L2 friction and never create L3.
+    """
+    if not payee:
+        return []
+    info = bank.payee_info(payee)
+    outgoing = [
+        t for t in bank.TRANSACTIONS
+        if t.get("direction") == "out" and t.get("counterparty") == payee
+    ]
+    features: list[dict] = []
+    score = 0.0
+    if not outgoing:
+        score += 0.15
+        features.append({"feature": "no_prior_payee_transfer", "weight": 0.15})
+    if info and info["known_days"] < NEW_PAYEE_DAYS:
+        score += 0.25
+        features.append({
+            "feature": "new_payee_relationship",
+            "weight": 0.25,
+            "known_days": info["known_days"],
+        })
+    if hour is not None and not (ACTIVE_HOURS[0] <= hour < ACTIVE_HOURS[1]):
+        score += 0.2
+        features.append({"feature": "inactive_time", "weight": 0.2, "hour": hour})
+    if not device_trusted:
+        score += 0.25
+        features.append({"feature": "untrusted_device", "weight": 0.25})
+    if score < RELATIONSHIP_EXPERT_THRESHOLD:
+        return []
+    return [{
+        "type": "relationship_expert",
+        "score": round(score, 2),
+        "threshold": RELATIONSHIP_EXPERT_THRESHOLD,
+        "features": features,
+    }]
+
+
 def evaluate(
     *,
     amount: float = 0.0,
@@ -125,6 +169,11 @@ def evaluate(
 
     reasons: list[str] = []
     behavior_signals = behavior_evidence(amount, payee) if defense_enabled else []
+    relationship_signals = (
+        relationship_expert(payee=payee, hour=hour, device_trusted=device_trusted)
+        if defense_enabled else []
+    )
+    explainable_signals = behavior_signals + relationship_signals
 
     # ---- L3：直接阻断，不提供"再来一次" ----
     l3 = False
@@ -193,10 +242,10 @@ def evaluate(
     if l2_reasons:
         return RiskDecision(level=RiskLevel.L2, reasons=l2_reasons,
                             limits=limits, injection_hits=injection_hits,
-                            evidence=behavior_signals)
+                            evidence=explainable_signals)
 
-    if behavior_signals:
-        for signal in behavior_signals:
+    if explainable_signals:
+        for signal in explainable_signals:
             if signal["type"] == "amount_spike":
                 l2_reasons.append(
                     f"本次向「{payee}」转账金额是历史平均的 {signal['multiplier']:.1f} 倍，"
@@ -205,9 +254,15 @@ def evaluate(
                 l2_reasons.append(
                     f"今天已向「{payee}」发起 {signal['count']} 笔转账，"
                     "短时重复付款需子女远程授权")
+            elif signal["type"] == "relationship_expert":
+                feature_names = "、".join(
+                    feature["feature"] for feature in signal["features"])
+                l2_reasons.append(
+                    f"账户—收款人—设备—时间关系评分 {signal['score']:.2f}，"
+                    f"命中特征：{feature_names}，需子女远程授权")
         return RiskDecision(level=RiskLevel.L2, reasons=l2_reasons,
                             limits=limits, injection_hits=injection_hits,
-                            evidence=behavior_signals)
+                            evidence=explainable_signals)
 
     # ---- L1 / L0 ----
     if amount > limits["free_limit"]:
@@ -216,12 +271,12 @@ def evaluate(
             reasons=[f"金额 {amount:.2f} 元超过免密上限 {limits['free_limit']:.0f} 元，"
                      f"需要大字弹窗二次确认"],
             limits=limits, injection_hits=injection_hits,
-            evidence=behavior_signals,
+            evidence=explainable_signals,
         )
     return RiskDecision(
         level=RiskLevel.L0,
         reasons=[f"金额 {amount:.2f} 元在免密额度内，且收款人在白名单，语音复述一次即可"],
-        limits=limits, injection_hits=injection_hits, evidence=behavior_signals,
+        limits=limits, injection_hits=injection_hits, evidence=explainable_signals,
     )
 
 
