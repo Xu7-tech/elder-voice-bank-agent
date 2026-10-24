@@ -590,6 +590,15 @@ def parse_intents(text: str, dialect_pref: str = "auto") -> tuple[list[Intent], 
                                for r in (data.get("intents") or []) if isinstance(r, dict)) if i]
     if rule_intent.name != "unknown":
         llm_names = [i.name for i in llm_intents]
+        # 订阅/扣费与守护日历是比账单分析更具体的业务意图。
+        # 模型容易把“扣款查询”“最近有什么安排”泛化成 bill_analysis；
+        # 只要规则已命中特定意图且模型没有同名结果，就保留规则判定。
+        if rule_intent.name in {"subscription_scan", "calendar_query"} \
+                and rule_intent.name not in llm_names:
+            rule_intent.slots["arbitration"] = (
+                f"特定规则判定 {rule_intent.name}，模型判成 {llm_names or '空'}，"
+                "采用规则结果")
+            return [rule_intent], signal
         # 结构性规则匹配的是整句句式（"每个月…转…"、"…卡"），比关键词精确得多：
         # 模型没提到它时，以规则为准 —— 否则"每个月1号转五百"会被压成一次性转账。
         if rule_intent.slots.get("rule_source") == "structural" and rule_intent.name not in llm_names:

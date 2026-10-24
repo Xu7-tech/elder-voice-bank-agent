@@ -990,6 +990,15 @@ class LLMIntegrationCase(FakeLLMMixin, unittest.TestCase):
         payload = agent.create_session(PlanRequest(text="每个月1号给老李转五百块", hour=10))
         self.assertEqual(payload["plan"]["steps"][0]["tool"], "transfer.schedule")
 
+    def test_specific_rule_intents_are_not_overridden_by_generic_bill_analysis(self):
+        self.fake_llm([{"intent": "bill_analysis"}])
+        subscription = nlu.parse_intent("我不认识这笔扣款，帮我查查")
+        calendar = nlu.parse_intent("我今天有什么安排")
+        self.assertEqual(subscription.name, "subscription_scan")
+        self.assertEqual(calendar.name, "calendar_query")
+        self.assertIn("arbitration", subscription.slots)
+        self.assertIn("arbitration", calendar.slots)
+
     def test_model_takes_over_only_for_rule_blind_phrasing(self):
         self.fake_llm([{"intent": "transfer", "payee": "老李", "amount": 500}])
         self.assertEqual(
