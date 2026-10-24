@@ -128,6 +128,7 @@ async def execute(req: ExecuteRequest):
 @app.post("/risk/evaluate", tags=["风控"])
 def evaluate(req: RiskRequest):
     return risk.evaluate(
+        account_id=req.elder_id,
         amount=req.amount, payee=req.payee, hour=req.hour,
         device_trusted=req.device_trusted, voiceprint_ok=req.voiceprint_ok,
         second_speaker=req.second_speaker, hesitation_count=req.hesitation_count,

@@ -50,6 +50,7 @@ class RiskDecision(BaseModel):
 
 class AuthTicket(BaseModel):
     id: str
+    elder_id: str = "E001"
     amount: float
     payee: str
     payee_account: str = ""
@@ -139,6 +140,7 @@ class TtsRequest(BaseModel):
 
 
 class RiskRequest(BaseModel):
+    elder_id: str = "E001"
     amount: float = 0.0
     payee: str = ""
     hour: int | None = None
