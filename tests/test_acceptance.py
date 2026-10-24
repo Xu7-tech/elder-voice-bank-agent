@@ -9,6 +9,7 @@ import json
 import pathlib
 import re
 import sys
+import tempfile
 import threading
 import unittest
 from datetime import datetime, timedelta
@@ -956,6 +957,19 @@ class AuditCase(unittest.TestCase):
         self.assertTrue(agent.AUDIT[0].entry_hash)
         if len(agent.AUDIT) > 1:
             self.assertEqual(agent.AUDIT[1].prev_hash, agent.AUDIT[0].entry_hash)
+
+    def test_audit_store_recovers_entries_after_reconfiguration(self):
+        with tempfile.TemporaryDirectory() as folder:
+            path = str(pathlib.Path(folder) / "audit.sqlite3")
+            try:
+                agent.configure_audit_store(path)
+                agent.create_session(PlanRequest(text="给老李转五十块"))
+                expected = len(agent.AUDIT)
+                agent.configure_audit_store(path)
+                self.assertEqual(len(agent.AUDIT), expected)
+                self.assertTrue(agent.verify_audit_chain()["valid"])
+            finally:
+                agent.configure_audit_store(":memory:")
 
 
 class FrontendStaticCase(unittest.TestCase):

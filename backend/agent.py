@@ -10,7 +10,9 @@ from __future__ import annotations
 import itertools
 import hashlib
 import json
+import os
 import re
+import sqlite3
 import threading
 import uuid
 from datetime import datetime, timedelta
@@ -26,6 +28,8 @@ WS_CLIENTS: list = []                 # 由 main.py 注册的 WebSocket 连接
 NOTIFIED_SESSIONS: set[str] = set()   # 已推送过执行通知的会话，避免重复推送
 _SEQ = itertools.count(1)
 _STATE_LOCK = threading.RLock()
+_AUDIT_DB_PATH = ":memory:"
+_AUDIT_DB: sqlite3.Connection | None = None
 
 # 这些动作不会拦下老人，但子女应当知情 —— 执行后主动推送到子女端
 CHILD_NOTIFY_TOOLS = {
@@ -39,13 +43,15 @@ CHILD_NOTIFY_TOOLS = {
 
 
 def audit(stage: str, actor: str, note: str, **detail) -> AuditEntry:
-    prev_hash = AUDIT[-1].entry_hash if AUDIT else ""
-    entry = AuditEntry(ts=datetime.now(), stage=stage, actor=actor, note=note,
-                       detail=detail, prev_hash=prev_hash)
-    entry.entry_hash = _audit_hash(entry)
-    AUDIT.append(entry)
-    del AUDIT[:-500]
-    return entry
+    with _STATE_LOCK:
+        prev_hash = AUDIT[-1].entry_hash if AUDIT else ""
+        entry = AuditEntry(ts=datetime.now(), stage=stage, actor=actor, note=note,
+                           detail=detail, prev_hash=prev_hash)
+        entry.entry_hash = _audit_hash(entry)
+        AUDIT.append(entry)
+        del AUDIT[:-500]
+        _persist_audit(entry)
+        return entry
 
 
 def _audit_hash(entry: AuditEntry) -> str:
@@ -75,6 +81,76 @@ def verify_audit_chain() -> dict:
             return {"valid": False, "entries": len(AUDIT), "checked": index,
                     "error": f"第 {index + 1} 条审计记录哈希不匹配"}
     return {"valid": True, "entries": len(AUDIT), "checked": len(AUDIT), "error": None}
+
+
+def _init_audit_store(path: str) -> sqlite3.Connection:
+    connection = sqlite3.connect(path, check_same_thread=False)
+    connection.execute(
+        """CREATE TABLE IF NOT EXISTS audit_log (
+               seq INTEGER PRIMARY KEY AUTOINCREMENT,
+               ts TEXT NOT NULL,
+               stage TEXT NOT NULL,
+               actor TEXT NOT NULL,
+               note TEXT NOT NULL,
+               detail_json TEXT NOT NULL,
+               prev_hash TEXT NOT NULL,
+               entry_hash TEXT NOT NULL
+           )"""
+    )
+    connection.commit()
+    return connection
+
+
+def _entry_from_row(row: tuple) -> AuditEntry:
+    return AuditEntry(
+        ts=datetime.fromisoformat(row[0]),
+        stage=row[1],
+        actor=row[2],
+        note=row[3],
+        detail=json.loads(row[4]),
+        prev_hash=row[5],
+        entry_hash=row[6],
+    )
+
+
+def _load_audit_store() -> None:
+    AUDIT.clear()
+    if _AUDIT_DB is None:
+        return
+    rows = _AUDIT_DB.execute(
+        "SELECT ts, stage, actor, note, detail_json, prev_hash, entry_hash "
+        "FROM audit_log ORDER BY seq DESC LIMIT 500"
+    ).fetchall()
+    AUDIT.extend(_entry_from_row(row) for row in reversed(rows))
+
+
+def _persist_audit(entry: AuditEntry) -> None:
+    if _AUDIT_DB is None:
+        return
+    _AUDIT_DB.execute(
+        "INSERT INTO audit_log "
+        "(ts, stage, actor, note, detail_json, prev_hash, entry_hash) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?)",
+        (entry.ts.isoformat(), entry.stage, entry.actor, entry.note,
+         json.dumps(entry.detail, ensure_ascii=False, sort_keys=True, default=str),
+         entry.prev_hash, entry.entry_hash),
+    )
+    _AUDIT_DB.commit()
+
+
+def configure_audit_store(path: str = ":memory:") -> dict:
+    """Switch audit storage, loading its retained entries for restart recovery."""
+    global _AUDIT_DB, _AUDIT_DB_PATH
+    with _STATE_LOCK:
+        if _AUDIT_DB is not None:
+            _AUDIT_DB.close()
+        _AUDIT_DB_PATH = path
+        _AUDIT_DB = _init_audit_store(path)
+        _load_audit_store()
+        return {"path": _AUDIT_DB_PATH, "entries": len(AUDIT)}
+
+
+configure_audit_store(os.environ.get("AUDIT_DB_PATH", ":memory:"))
 
 
 def attach_ws(client) -> None:
@@ -1102,3 +1178,6 @@ def reset_all() -> None:
     NOTIFICATIONS.clear()
     NOTIFIED_SESSIONS.clear()
     AUDIT.clear()
+    if _AUDIT_DB is not None:
+        _AUDIT_DB.execute("DELETE FROM audit_log")
+        _AUDIT_DB.commit()
