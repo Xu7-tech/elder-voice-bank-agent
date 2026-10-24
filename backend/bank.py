@@ -25,6 +25,14 @@ ACCOUNTS: dict[str, dict] = {
         "locked": 0.0,
         "emergency_stopped": False,
     },
+    "E002": {
+        "id": "E002",
+        "owner": "李淑芬",
+        "role": "elder",
+        "balance": 18650.00,
+        "locked": 0.0,
+        "emergency_stopped": False,
+    },
 }
 
 # 口语别名簿：老人只说"孙子"，系统负责翻译成人名，并暴露重名歧义。
@@ -118,6 +126,8 @@ TRANSACTIONS: list[dict] = [
     {"id": "T0017", "date": "2026-07-06", "time": "09:00", "amount": 3000.00,
      "direction": "in", "counterparty": "张伟", "category": "赡养费", "channel": "转账"},
 ]
+for _transaction in TRANSACTIONS:
+    _transaction.setdefault("account_id", "E001")
 
 # 老人自己设置的定期转账（生活费、物业费一类）
 SCHEDULES: list[dict] = []
@@ -160,7 +170,14 @@ LIMITS: dict[str, dict] = {
         "daily_limit": 50000.0,
         "overseas_enabled": True,
         "updated_by": "system",
-    }
+    },
+    "E002": {
+        "free_limit": 200.0,
+        "single_limit": 5000.0,
+        "daily_limit": 50000.0,
+        "overseas_enabled": True,
+        "updated_by": "system",
+    },
 }
 
 # --------------------------------------------------------------------------

@@ -523,6 +523,8 @@ def build_multi_plan(intents: list[Intent]) -> Plan:
 
 
 def create_session(req) -> dict:
+    if req.elder_id not in bank.ACCOUNTS or bank.ACCOUNTS[req.elder_id].get("role") != "elder":
+        return {"error": f"账户 {req.elder_id} 不存在或不是老人账户"}
     intents, signal = _resolve_intents(req)
     intent = intents[0]
     names = "、".join(i.name for i in intents)
@@ -538,6 +540,7 @@ def create_session(req) -> dict:
     session_id = f"S{uuid.uuid4().hex[:8]}"
     session = {
         "id": session_id,
+        "elder_id": req.elder_id,
         "intent": intent,
         "plan": plan,
         "status": "pending_confirm",
@@ -624,6 +627,7 @@ def _evaluate_step(step: PlanStep, req, utterance: str, llm_signal: dict | None)
         return RiskDecision(level=RiskLevel.L0, reasons=["紧急止付属于保命操作，任何额度都直接执行"])
     if step.tool in ("transfer.execute", "transfer.schedule"):
         return risk.evaluate(
+            account_id=req.elder_id,
             amount=step.params["amount"], payee=step.params["payee"],
             hour=req.hour, device_trusted=req.device_trusted, voiceprint_ok=req.voiceprint_ok,
             second_speaker=req.second_speaker, utterance=utterance,
@@ -662,6 +666,7 @@ def _confirm_locked(session_id: str, req) -> dict:
         if session["hesitation"] >= 2:
             step = _fund_step(session["plan"]) or session["plan"].steps[0]
             upgraded = risk.evaluate(
+                account_id=session.get("elder_id", "E001"),
                 amount=step.params.get("amount", 0), payee=step.params.get("payee", ""),
                 hesitation_count=session["hesitation"], utterance=session["intent"].raw_utterance,
                 llm_fraud=session.get("llm_signal"))
@@ -715,6 +720,8 @@ def execute(session_id: str) -> dict:
                 return {"error": "授权票据已被使用，不可重放"}
             if ticket.status != "approved":
                 return {"error": "尚未获得子女授权"}
+            if ticket.elder_id != session.get("elder_id", "E001"):
+                return {"error": "授权票据不属于当前老人账户"}
             step = session["plan"].steps[0]
             # 票据绑定金额与收款人，参数不符即拒绝执行。
             if abs(ticket.amount - step.params.get("amount", -1)) > 0.001 or \
@@ -723,7 +730,7 @@ def execute(session_id: str) -> dict:
             funds_error = _funds_error(session)
             if funds_error:
                 audit("execute", "bank-core", funds_error,
-                      balance=bank.ACCOUNTS["E001"]["balance"])
+                      balance=bank.ACCOUNTS[session.get("elder_id", "E001")]["balance"])
                 return {"error": funds_error, "session": _session_payload(session)}
             ticket.status = "used"
             ticket.used_at = datetime.now()
@@ -738,7 +745,7 @@ def _finalize(session: dict) -> dict:
     funds_error = _funds_error(session)
     if funds_error:
         audit("execute", "bank-core", funds_error,
-              balance=bank.ACCOUNTS["E001"]["balance"])
+              balance=bank.ACCOUNTS[session.get("elder_id", "E001")]["balance"])
         return {"error": funds_error, "session": _session_payload(session)}
     results = []
     for step in session["plan"].steps:
@@ -754,14 +761,14 @@ def _funds_error(session: dict) -> str | None:
     for step in session["plan"].steps:
         amount = float(step.params.get("amount", 0.0))
         if step.tool in ("transfer.execute", "wealth.purchase") and \
-                amount > bank.ACCOUNTS["E001"]["balance"]:
+                amount > bank.ACCOUNTS[session.get("elder_id", "E001")]["balance"]:
             return f"执行前复核失败：当前余额不足以支付 {money(amount)} 元"
     return None
 
 
 def _execute_step(step: PlanStep, session: dict) -> dict:
     tool, params = step.tool, step.params
-    acc = bank.ACCOUNTS["E001"]
+    acc = bank.ACCOUNTS[session.get("elder_id", "E001")]
 
     if tool == "transfer.execute":
         acc["balance"] -= params["amount"]
@@ -871,6 +878,7 @@ def create_ticket(session: dict) -> AuthTicket:
     amount = float(step.params.get("amount", 0.0))
     ticket = AuthTicket(
         id=f"TK{uuid.uuid4().hex[:8].upper()}",
+        elder_id=session.get("elder_id", "E001"),
         amount=amount,
         payee=step.params.get("payee", ""),
         payee_account=(bank.payee_info(step.params.get("payee", "")) or {}).get("account", ""),
@@ -1131,6 +1139,7 @@ def _session_payload(session: dict) -> dict:
     plan: Plan = session["plan"]
     payload = {
         "session_id": session["id"],
+        "elder_id": session.get("elder_id", "E001"),
         "status": session["status"],
         "intent": plan.intent.model_dump(mode="json"),
         "plan": plan.model_dump(mode="json"),

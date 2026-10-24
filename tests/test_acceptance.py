@@ -608,6 +608,37 @@ class BillReportCase(unittest.TestCase):
         year = agent.bill_report("year")
         self.assertGreater(year["total_out"], report["total_out"])
 
+
+class MultiAccountCase(unittest.TestCase):
+    """多老人账户隔离：余额、风控和授权会话不能串户。"""
+
+    def setUp(self):
+        agent.reset_all()
+
+    def test_second_elder_has_independent_balance_and_session(self):
+        first = bank.ACCOUNTS["E001"]["balance"]
+        second = bank.ACCOUNTS["E002"]["balance"]
+        payload = agent.create_session(PlanRequest(text="查询余额", elder_id="E002"))
+        self.assertEqual(payload["elder_id"], "E002")
+        done = agent.confirm(payload["session_id"], ConfirmRequest(
+            session_id=payload["session_id"], ack_voice=True, ack_popup=True))
+        self.assertEqual(done["result"]["steps"][0]["balance"], second)
+        self.assertEqual(bank.ACCOUNTS["E001"]["balance"], first)
+
+    def test_unknown_elder_account_is_rejected(self):
+        payload = agent.create_session(PlanRequest(text="查询余额", elder_id="E999"))
+        self.assertIn("不存在", payload["error"])
+
+    def test_risk_history_is_filtered_by_account(self):
+        bank.TRANSACTIONS.insert(0, {
+            "id": "E002-T", "date": bank.today(), "time": "10:00",
+            "amount": 10.0, "direction": "out", "counterparty": "老李",
+            "category": "转账", "channel": "语音管家", "account_id": "E002",
+        })
+        evidence = risk.behavior_evidence(1000.0, "老李", "E002")
+        self.assertTrue(any(item["type"] == "amount_spike" for item in evidence))
+        self.assertEqual(risk.behavior_evidence(1000.0, "老李", "E001"), [])
+
     def test_annual_intent_switches_period(self):
         payload = agent.create_session(PlanRequest(text="今年一共花了多少"))
         self.assertEqual(payload["plan"]["steps"][0]["params"]["period"], "year")
