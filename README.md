@@ -62,6 +62,7 @@ python -m uvicorn backend.main:app --host 127.0.0.1 --port 8077
 | **行为风控** | 历史金额跃升 / 当日重复付款证据 | 同左，模型不可降低等级 | `backend/risk.py::behavior_evidence` |
 | **关系特征专家** | 账户—收款人—设备—时间关系评分 | 只可解释性升权到 L2，不可触发 L3 | `backend/risk.py::relationship_expert` |
 | **审计完整性** | 审计记录前序哈希 + SHA-256 当前哈希 | `/audit/verify` 检测篡改和断链 | `backend/agent.py::verify_audit_chain` |
+| **审计持久化** | 可配置 SQLite 审计库，重启后恢复最近记录 | 默认内存演示；生产设置 `AUDIT_DB_PATH` | `backend/agent.py::configure_audit_store` |
 | 语音识别 | 浏览器原生识别（Edge / Chrome，支持粤语） | 同左，另可通过 `/asr` 接口接云端 | `backend/voice.py::transcribe` |
 | 语音合成 | 浏览器语音合成 | **讯飞在线合成 TTS** | `backend/voice.py::_provider_tts` |
 
@@ -189,6 +190,9 @@ $env:XFYUN_TTS_VCN     = "xiaoyan"      # 音色；粤语需填账号可用的�
 **关键设计：权限裁定与语义理解彻底分离。** LLM 只输出结构化槽位，不持有任何资金接口调用权；
 额度、白名单、时段、收款人风险分全部由规则引擎裁定 —— 这是可复现、可审计的前提。
 规则引擎还会返回可解释行为证据：历史金额跃升、当日重复付款和关系特征专家评分只升到 L2，不直接越级到 L3。
+
+生产部署可设置 `AUDIT_DB_PATH` 指向 SQLite 文件，让审计记录在进程重启后恢复；
+未设置时仍使用内存库，保证离线演示不会留下本地数据文件。
 
 一笔转账的完整链路见 [流程图](docs/images/flow-transfer.svg)：
 一致性校验 → 注入净化与权限判定 → 复述确认 → 执行落账。
