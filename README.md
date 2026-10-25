@@ -45,6 +45,16 @@ python -m uvicorn backend.main:app --host 127.0.0.1 --port 8077
 > 语音识别用浏览器原生识别（Edge / Chrome 支持 `zh-CN` 与 `zh-HK`），播报用浏览器语音合成。
 > 现场断网也能跑完演示主线。
 
+### 评委快速评审路径
+
+1. 运行 `.\run.ps1`（或执行上面的手工启动命令）。
+2. 打开老人端，输入「给老李转五十块」，观察语音复述、风险等级和确认执行。
+3. 输入「给老李转五千块」，观察自动进入子女授权；切换子女端可审批或拒绝票据。
+4. 打开攻防演示台运行 `ATK-01`、`ATK-09` 和 `ATK-13`，查看诈骗、注入和模型盲区的差异。
+5. 查看 `/system/status`、`/audit/verify`，确认降级状态与审计链完整性。
+
+项目使用**模拟银行沙箱**，不会连接真实银行或执行真实资金交易；所有余额、流水和授权均为演示数据。
+
 ---
 
 ## AI 能力与模型接入
@@ -270,7 +280,7 @@ $env:XFYUN_TTS_VCN     = "xiaoyan"      # 音色；粤语需填账号可用的�
 ## 测试
 
 ```bash
-python -m unittest discover -s tests -v    # 149 项自动化测试
+python -m unittest discover -s tests -v    # 160 项自动化测试
 python scripts/evaluate.py                 # 评测指标
 ```
 
@@ -332,7 +342,7 @@ docs/         技术方案、场景覆盖表、安全测试用例、架构图
 deliverables/ 作品介绍 PPT、作品演示视频
 reports/      评测指标结果（JSON + Markdown）
 deliverables/ 作品介绍 PPT
-tests/        149 项验收测试 + 端到端 HTTP 冒烟测试
+tests/        160 项验收测试 + 端到端 HTTP 冒烟测试
 ```
 
 ---

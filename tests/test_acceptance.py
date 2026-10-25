@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import base64
 import json
+import os
 import pathlib
 import re
 import sys
@@ -13,6 +14,7 @@ import tempfile
 import threading
 import unittest
 from datetime import datetime, timedelta
+from unittest.mock import patch
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent.parent))
 
@@ -416,8 +418,9 @@ class InjectionDefenseCase(unittest.TestCase):
 
     def test_llm_only_script_needs_the_model(self):
         """ATK-13 是关键词库的盲区：降级模式下明确标为未测量。"""
-        self.assertFalse(nlu.llm_available())
-        result = attacks.run_script("ATK-13")
+        with patch.dict(os.environ, {"LLM_API_KEY": ""}):
+            self.assertFalse(nlu.llm_available())
+            result = attacks.run_script("ATK-13")
         self.assertTrue(result["requires_llm"])
         self.assertFalse(result["llm_live"])
         self.assertIsNone(result["defended"])
@@ -790,7 +793,8 @@ class DegradedModeCase(unittest.TestCase):
         agent.reset_all()
 
     def test_cloud_providers_report_unavailable(self):
-        self.assertFalse(nlu.llm_available())
+        with patch.dict(os.environ, {"LLM_API_KEY": ""}):
+            self.assertFalse(nlu.llm_available())
         self.assertFalse(voice.stt_available())
 
     def test_asr_falls_back_to_offline_corpus(self):

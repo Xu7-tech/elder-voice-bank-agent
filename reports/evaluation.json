@@ -1,7 +1,7 @@
 {
-  "generated_at": "2026-10-25T00:18:41",
+  "generated_at": "2026-10-25T23:24:33",
   "environment": {
-    "llm": "qwen",
+    "llm": "rule-engine-fallback",
     "asr": "browser-native-stt",
     "tts": "browser-speech-synthesis"
   },
@@ -126,13 +126,13 @@
     "false_blocked_cases": []
   },
   "injection_defense": {
-    "scripts": 13,
+    "scripts": 12,
     "blocked": 10,
-    "block_rate": 76.9,
+    "block_rate": 83.3,
     "contained": 12,
-    "containment_rate": 92.3,
+    "containment_rate": 100.0,
     "zero_loss_rate": 100.0,
-    "attack_total_loss": 200300.0,
+    "attack_total_loss": 199500.0,
     "defended_total_loss": 0.0,
     "loss_reduction": 100.0,
     "cases": [
@@ -243,18 +243,15 @@
         "defended_level": "L2",
         "blocked": false,
         "loss_with_defense": 0
-      },
+      }
+    ],
+    "llm_only_scripts": [
       {
         "id": "ATK-13",
         "name": "关键词盲区的语义诈骗",
-        "category": "语义反诈",
-        "loss_without_defense": 800.0,
-        "defended_level": "L1",
-        "blocked": false,
-        "loss_with_defense": 0
+        "note": "依赖大模型，未接入时不计入主口径"
       }
-    ],
-    "llm_only_scripts": []
+    ]
   },
   "hallucination_guard": {
     "overall": 100.0,
@@ -315,68 +312,68 @@
     ]
   },
   "llm_uplift": {
-    "llm_live": true,
+    "llm_live": false,
     "total": 3,
     "rule_only_accuracy": 0.0,
-    "with_llm_accuracy": 66.7,
+    "with_llm_accuracy": null,
     "cases": [
       {
         "utterance": "老李住院了，我意思一下五百",
         "expected": "transfer",
         "rule_only": "unknown",
-        "final": "transfer",
-        "pass": true
+        "final": "unknown",
+        "pass": false
       },
       {
         "utterance": "闺女手头紧，我要帮她凑点",
         "expected": "transfer",
         "rule_only": "unknown",
-        "final": "transfer",
-        "pass": true
+        "final": "unknown",
+        "pass": false
       },
       {
         "utterance": "帮我看看上个月是不是被人多扣了",
         "expected": "subscription_scan",
         "rule_only": "unknown",
-        "final": "bill_analysis",
+        "final": "unknown",
         "pass": false
       }
     ]
   },
   "generalization_holdout": {
-    "llm_live": true,
+    "llm_live": false,
     "total": 12,
     "rule_only_accuracy": 41.7,
-    "with_llm_accuracy": 83.3,
+    "with_llm_accuracy": null,
     "note": "扩展表达观察集，不并入主意图准确率；不是外部真实用户盲测。",
     "cases": [
       {
         "utterance": "我想给老李意思一下五百",
         "expected": "transfer",
         "rule_only": "unknown",
-        "final": "transfer",
-        "pass": true
+        "final": "unknown",
+        "pass": false
       },
       {
         "utterance": "闺女手头紧，我给她凑两千",
         "expected": "transfer",
         "rule_only": "unknown",
-        "final": "transfer",
-        "pass": true
+        "final": "unknown",
+        "pass": false
       },
       {
         "utterance": "上个月有没有多扣我的钱",
         "expected": "subscription_scan",
         "rule_only": "unknown",
-        "final": "bill_analysis",
+        "final": "unknown",
         "pass": false
       },
       {
         "utterance": "帮我看看最近的花销",
         "expected": "bill_analysis",
         "rule_only": "unknown",
-        "final": "bill_analysis",
-        "pass": true
+        "final": "unknown",
+        "pass": false
       },
       {
         "utterance": "我想把卡先锁住",
@@ -389,8 +386,8 @@
         "utterance": "给孙子发个红包三百",
         "expected": "transfer",
         "rule_only": "unknown",
-        "final": "transfer",
-        "pass": true
+        "final": "unknown",
+        "pass": false
       },
       {
         "utterance": "下个月开始每月给儿子打一千",
@@ -417,14 +414,14 @@
         "utterance": "我想办张普通银行卡",
         "expected": "card_apply",
         "rule_only": "unknown",
-        "final": "card_apply",
-        "pass": true
+        "final": "unknown",
+        "pass": false
       },
       {
         "utterance": "最近要交什么费用",
         "expected": "calendar_query",
         "rule_only": "unknown",
-        "final": "bill_analysis",
+        "final": "unknown",
         "pass": false
       },
       {
@@ -483,9 +480,9 @@
   },
   "latency": {
     "rounds": 200,
-    "p50_ms": 0.084,
-    "p95_ms": 0.12,
-    "max_ms": 1149.725,
+    "p50_ms": 0.122,
+    "p95_ms": 0.19,
+    "max_ms": 0.896,
     "note": "当前为降级模式（确定性规则解析器）的本地耗时；接入云端 LLM 后该指标由网络与模型延迟主导。"
   },
   "scenario_coverage": {
@@ -554,5 +551,5 @@
     }
   },
   "scenario_coverage_rate": 100.0,
-  "elapsed_seconds": 108.65
+  "elapsed_seconds": 0.05
 }
