@@ -278,7 +278,7 @@ def _resolve_intents(req) -> tuple[list[Intent], dict]:
     return nlu.parse_intents(req.text, req.dialect)
 
 
-def build_plan(intent: Intent) -> Plan:
+def build_plan(intent: Intent, account_id: str = "E001") -> Plan:
     name = intent.name
     slots = intent.slots
     raw = intent.raw_utterance
@@ -361,7 +361,7 @@ def build_plan(intent: Intent) -> Plan:
         return Plan(intent=intent, steps=[step], readback=readback)
 
     if name == "balance_query":
-        acc = bank.ACCOUNTS["E001"]
+        acc = bank.ACCOUNTS[account_id]
         readback = (f"您的活期账户余额是 {money(acc['balance'])} 元，"
                     f"其中 {money(acc['locked'])} 元被定为专项用途暂不可用。")
         return Plan(intent=intent, steps=[PlanStep(tool="bank.balance", params={},
@@ -369,7 +369,7 @@ def build_plan(intent: Intent) -> Plan:
 
     if name == "bill_analysis":
         period = slots.get("period", "month")
-        report = bill_report(period)
+        report = bill_report(period, account_id)
         readback = report["speech"]
         label = "月度" if period == "month" else "年度"
         return Plan(intent=intent, steps=[PlanStep(tool="bank.bill_report",
@@ -402,7 +402,7 @@ def build_plan(intent: Intent) -> Plan:
         return Plan(intent=intent, steps=[step], readback=readback, risk_hint=hint)
 
     if name == "wealth_redeem":
-        holdings = bank.HOLDINGS
+        holdings = bank.scoped(bank.HOLDINGS, account_id)
         total = sum(h["amount"] for h in holdings)
         step = PlanStep(tool="wealth.redeem", params={"holding_ids": [h["id"] for h in holdings]},
                         summary=f"赎回持仓共 {money(total)} 元")
@@ -410,7 +410,7 @@ def build_plan(intent: Intent) -> Plan:
                     readback=f"您持有的稳健理财一共 {money(total)} 元，全部赎回吗？确认后钱会回到活期。")
 
     if name == "card_loss":
-        card = bank.CARDS[0]
+        card = next(c for c in bank.scoped(bank.CARDS, account_id))
         step = PlanStep(tool="card.loss", params={"card_id": card["id"]},
                         summary=f"挂失尾号 {card['tail']} 的借记卡")
         return Plan(intent=intent, steps=[step],
@@ -425,17 +425,18 @@ def build_plan(intent: Intent) -> Plan:
                              f"收到新卡后还要本人激活才能用。确认吗？")
 
     if name == "card_switch":
+        card = next(c for c in bank.scoped(bank.CARDS, account_id))
         enable = slots.get("enable", False)
         feature = slots.get("feature", "overseas")
         label = "境外交易" if feature == "overseas" else "境内交易"
         step = PlanStep(tool="card.switch",
-                        params={"card_id": bank.CARDS[0]["id"], "feature": feature, "enable": enable},
+                        params={"card_id": card["id"], "feature": feature, "enable": enable},
                         summary=f"{'打开' if enable else '关闭'}{label}")
         return Plan(intent=intent, steps=[step],
                     readback=f"您要把{label}{'打开' if enable else '关掉'}，确认吗？")
 
     if name in ("subscription_scan", "subscription_cancel"):
-        scan = scan_subscriptions()
+        scan = scan_subscriptions(account_id)
         if name == "subscription_cancel" or slots.get("want_cancel"):
             target = next((s for s in scan["items"] if s["suspicious"]), None)
             if target is None:
@@ -451,9 +452,10 @@ def build_plan(intent: Intent) -> Plan:
                     readback=scan["speech"])
 
     if name == "calendar_query":
-        events = due_guard_events()
+        events = due_guard_events(account_id=account_id)
         if not events:
-            upcoming = sorted(bank.GUARD_EVENTS, key=lambda e: e["date"])[:3]
+            upcoming = sorted(bank.scoped(bank.GUARD_EVENTS, account_id),
+                              key=lambda e: e["date"])[:3]
             listing = "；".join(f"{e['date']} {e['title']}" for e in upcoming)
             return Plan(intent=intent, steps=[PlanStep(tool="guard.list", params={},
                                                        summary="查询守护日历")],
@@ -465,8 +467,9 @@ def build_plan(intent: Intent) -> Plan:
 
     if name == "guard_run":
         target = slots.get("target") or ""
-        matched = [e for e in bank.GUARD_EVENTS if target and target in e["title"]]
-        event = matched[0] if matched else min(bank.GUARD_EVENTS, key=lambda e: e["date"])
+        events = bank.scoped(bank.GUARD_EVENTS, account_id)
+        matched = [e for e in events if target and target in e["title"]]
+        event = matched[0] if matched else min(events, key=lambda e: e["date"])
         step = PlanStep(tool="guard.run", params={"event_id": event["id"]},
                         summary=event["title"])
         return Plan(intent=intent, steps=[step],
@@ -491,13 +494,13 @@ def _fund_step(plan: Plan) -> PlanStep | None:
     return next((s for s in plan.steps if s.tool in FUND_TOOLS), None)
 
 
-def build_multi_plan(intents: list[Intent]) -> Plan:
+def build_multi_plan(intents: list[Intent], account_id: str = "E001") -> Plan:
     """把一句话里的多件事合并成一个计划。
 
     上限：1 个动资金步骤 + 2 个只读步骤。超出则只办第一件并说明，
     避免出现"一次确认背后藏着多张授权票据"这种说不清的交互。
     """
-    plans = [build_plan(i) for i in intents]
+    plans = [build_plan(i, account_id) for i in intents]
     for single in plans:
         # 有任何一件需要先澄清，就只办那一件，别把问句夹进复述里
         if not single.steps or single.steps[0].tool.startswith("contact."):
@@ -533,7 +536,7 @@ def create_session(req) -> dict:
           slots={k: v for k, v in intent.slots.items() if k != "consistency_note"},
           consistency_note=intent.slots.get("consistency_note"),
           intents=[i.name for i in intents], llm_fraud=signal or None)
-    plan = build_multi_plan(intents)
+    plan = build_multi_plan(intents, req.elder_id)
     audit("plan", "agent", plan.readback,
           steps=[s.tool for s in plan.steps], readback=plan.readback)
 
@@ -774,7 +777,8 @@ def _execute_step(step: PlanStep, session: dict) -> dict:
         acc["balance"] -= params["amount"]
         tx = {"id": bank.next_id("T", bank.TRANSACTIONS), "date": bank.today(), "time": datetime.now().strftime("%H:%M"),
               "amount": params["amount"], "direction": "out", "counterparty": params["payee"],
-              "category": "转账", "channel": "语音管家", "remark": params.get("remark", "")}
+              "category": "转账", "channel": "语音管家", "remark": params.get("remark", ""),
+              "account_id": session.get("elder_id", "E001")}
         bank.TRANSACTIONS.insert(0, tx)
         return {"summary": f"已向 {params['payee']} 转出 {money(params['amount'])} 元",
                 "tx": tx, "balance": acc["balance"]}
@@ -783,13 +787,15 @@ def _execute_step(step: PlanStep, session: dict) -> dict:
         return {"summary": "余额查询完成", "balance": acc["balance"], "locked": acc["locked"]}
 
     if tool == "bank.bill_report":
-        report = bill_report(params.get("period", "month"))
+        report = bill_report(params.get("period", "month"),
+                             session.get("elder_id", "E001"))
         return {"summary": "资金安全体检报告已生成", **report}
 
     if tool == "transfer.schedule":
+        account_id = session.get("elder_id", "E001")
         entry = {"id": f"SCH{len(bank.SCHEDULES) + 1:03d}", "payee": params["payee"],
                  "amount": params["amount"], "day": params["day"],
-                 "created": bank.today()}
+                 "created": bank.today(), "account_id": account_id}
         bank.SCHEDULES.append(entry)
         return {"summary": f"已设置定期转账：每月 {params['day']} 号向 {params['payee']} "
                            f"转 {money(params['amount'])} 元", "schedule": entry}
@@ -798,7 +804,8 @@ def _execute_step(step: PlanStep, session: dict) -> dict:
         product = next(p for p in bank.WEALTH_PRODUCTS if p["id"] == params["product_id"])
         acc["balance"] -= params["amount"]
         bank.HOLDINGS.append({"id": bank.next_id("H", bank.HOLDINGS),
-                              "product_id": product["id"], "amount": params["amount"]})
+                              "product_id": product["id"], "amount": params["amount"],
+                              "account_id": session.get("elder_id", "E001")})
         if product["risk"] not in ("R1", "R2"):
             return {"summary": f"「{product['name']}」已进入 24 小时冷静期，到期前可随时撤回",
                     "cooling_off_hours": 24, "product": product["name"]}
@@ -806,13 +813,16 @@ def _execute_step(step: PlanStep, session: dict) -> dict:
                 "balance": acc["balance"]}
 
     if tool == "wealth.redeem":
-        total = sum(h["amount"] for h in bank.HOLDINGS)
+        holdings = bank.scoped(bank.HOLDINGS, session.get("elder_id", "E001"))
+        total = sum(h["amount"] for h in holdings)
         acc["balance"] += total
-        bank.HOLDINGS.clear()
+        bank.HOLDINGS[:] = [h for h in bank.HOLDINGS if h not in holdings]
         return {"summary": f"已赎回 {money(total)} 元，资金回到活期", "balance": acc["balance"]}
 
     if tool == "card.loss":
-        card = next(c for c in bank.CARDS if c["id"] == params["card_id"])
+        card = next(c for c in bank.CARDS
+                    if c["id"] == params["card_id"]
+                    and c.get("account_id", "E001") == session.get("elder_id", "E001"))
         card["loss_reported"] = True
         card["status"] = "已挂失"
         card["replacement"] = (datetime.now() + timedelta(days=3)).strftime("%Y-%m-%d")
@@ -822,6 +832,7 @@ def _execute_step(step: PlanStep, session: dict) -> dict:
     if tool == "card.apply":
         application = {
             "id": f"APP{len(bank.CARD_APPLICATIONS) + 1:03d}",
+            "account_id": session.get("elder_id", "E001"),
             "card_type": params.get("card_type", "借记卡"),
             "status": "已受理",
             "submitted": bank.today(),
@@ -833,28 +844,36 @@ def _execute_step(step: PlanStep, session: dict) -> dict:
                            f"预计 {application['expected']} 前出结果", "application": application}
 
     if tool == "card.switch":
-        card = next(c for c in bank.CARDS if c["id"] == params["card_id"])
+        card = next(c for c in bank.CARDS
+                    if c["id"] == params["card_id"]
+                    and c.get("account_id", "E001") == session.get("elder_id", "E001"))
         if params["feature"] == "overseas":
             card["overseas_enabled"] = params["enable"]
         return {"summary": f"{'打开' if params['enable'] else '关闭'}成功", "card": card}
 
     if tool == "subscription.cancel":
-        sub = next(s for s in bank.SUBSCRIPTIONS if s["id"] == params["subscription_id"])
+        sub = next(s for s in bank.SUBSCRIPTIONS
+                   if s["id"] == params["subscription_id"]
+                   and s.get("account_id", "E001") == session.get("elder_id", "E001"))
         sub["status"] = "cancelled"
         return {"summary": f"已取消「{sub['merchant']}」的自动扣费", "subscription": sub}
 
     if tool == "subscription.list":
-        return {"summary": "订阅扫描完成", **scan_subscriptions()}
+        return {"summary": "订阅扫描完成",
+                **scan_subscriptions(session.get("elder_id", "E001"))}
 
     if tool == "guard.list":
         return {"summary": "守护日历查询完成",
-                "events": sorted(bank.GUARD_EVENTS, key=lambda e: e["date"])}
+                "events": sorted(bank.scoped(bank.GUARD_EVENTS,
+                                             session.get("elder_id", "E001")),
+                                 key=lambda e: e["date"])}
 
     if tool == "guard.run":
         return run_guard_event(params["event_id"], session)
 
     if tool == "bank.emergency_stop":
-        return emergency_stop(params.get("reason", ""))
+        return emergency_stop(params.get("reason", ""),
+                              session.get("elder_id", "E001"))
 
     if tool == "notify.reminder":
         return {"summary": step.summary}
@@ -935,21 +954,24 @@ def expire_stale_tickets() -> None:
 # --------------------------------------------------------------------------
 
 
-def _scoped_transactions(period: str) -> list[dict]:
+def _scoped_transactions(period: str, account_id: str = "E001") -> list[dict]:
     now = datetime.now()
     if period == "month":
         key = now.strftime("%Y-%m")
-        scoped = [t for t in bank.TRANSACTIONS if t["date"].startswith(key)]
-        if not scoped and bank.TRANSACTIONS:
-            latest = max(t["date"] for t in bank.TRANSACTIONS)
+        scoped = [t for t in bank.scoped(bank.TRANSACTIONS, account_id)
+                  if t["date"].startswith(key)]
+        account_transactions = bank.scoped(bank.TRANSACTIONS, account_id)
+        if not scoped and account_transactions:
+            latest = max(t["date"] for t in account_transactions)
             key = latest[:7]
     else:
         key = now.strftime("%Y")
-    return [t for t in bank.TRANSACTIONS if t["date"].startswith(key)]
+    return [t for t in bank.scoped(bank.TRANSACTIONS, account_id)
+            if t["date"].startswith(key)]
 
 
-def bill_report(period: str = "month") -> dict:
-    scoped = _scoped_transactions(period)
+def bill_report(period: str = "month", account_id: str = "E001") -> dict:
+    scoped = _scoped_transactions(period, account_id)
     label = "这个月" if period == "month" else "今年"
     out = [t for t in scoped if t["direction"] == "out"]
     income = sum(t["amount"] for t in scoped if t["direction"] == "in")
@@ -957,7 +979,7 @@ def bill_report(period: str = "month") -> dict:
     by_category: dict[str, float] = {}
     for t in out:
         by_category[t["category"]] = by_category.get(t["category"], 0.0) + t["amount"]
-    abnormal = detect_abnormal(period)
+    abnormal = detect_abnormal(period, account_id)
     ranked = sorted(by_category.items(), key=lambda kv: -kv[1])
     speech = (f"{label}一共支出 {money(total_out)} 元，收入 {money(income)} 元。"
               f"花得最多的是{'、'.join(f'{k} {money(v)} 元' for k, v in ranked[:3])}。")
@@ -972,9 +994,9 @@ def bill_report(period: str = "month") -> dict:
             "by_category": by_category, "abnormal": abnormal, "speech": speech}
 
 
-def detect_abnormal(period: str = "month") -> list[dict]:
+def detect_abnormal(period: str = "month", account_id: str = "E001") -> list[dict]:
     """异常交易识别：直接接反诈规则库。深夜大额、连续小额试探、诱导型订阅。"""
-    scoped = _scoped_transactions(period)
+    scoped = _scoped_transactions(period, account_id)
     abnormal: list[dict] = []
     for t in scoped:
         if t["direction"] != "out":
@@ -997,8 +1019,9 @@ def detect_abnormal(period: str = "month") -> list[dict]:
 # --------------------------------------------------------------------------
 
 
-def scan_subscriptions() -> dict:
-    active = [s for s in bank.SUBSCRIPTIONS if s["status"] == "active"]
+def scan_subscriptions(account_id: str = "E001") -> dict:
+    subscriptions = bank.scoped(bank.SUBSCRIPTIONS, account_id)
+    active = [s for s in subscriptions if s["status"] == "active"]
     suspicious = [s for s in active if s["suspicious"]]
     monthly = sum(s["monthly_amount"] for s in active)
     if suspicious:
@@ -1008,7 +1031,7 @@ def scan_subscriptions() -> dict:
                   f"{s['reason']}。下个月 {s['next_charge']} 又要扣了，要取消吗？")
     else:
         speech = f"您每月自动扣费一共 {money(monthly)} 元，没有查出可疑的诱导订阅。"
-    return {"items": [dict(s) for s in bank.SUBSCRIPTIONS], "monthly_total": monthly,
+    return {"items": [dict(s) for s in subscriptions], "monthly_total": monthly,
             "suspicious_count": len(suspicious), "speech": speech}
 
 
@@ -1017,10 +1040,10 @@ def scan_subscriptions() -> dict:
 # --------------------------------------------------------------------------
 
 
-def due_guard_events(today: str | None = None) -> list[dict]:
+def due_guard_events(today: str | None = None, account_id: str = "E001") -> list[dict]:
     today_dt = datetime.strptime(today, "%Y-%m-%d") if today else datetime.now()
     due = []
-    for event in bank.GUARD_EVENTS:
+    for event in bank.scoped(bank.GUARD_EVENTS, account_id):
         try:
             event_dt = datetime.strptime(event["date"], "%Y-%m-%d")
         except (ValueError, TypeError):
@@ -1036,9 +1059,12 @@ def due_guard_events(today: str | None = None) -> list[dict]:
 
 def run_guard_event(event_id: str, session: dict) -> dict:
     """跨场景联动动作链。每条动作链依然要过权限分级，联动不代表免确认。"""
-    event = next(e for e in bank.GUARD_EVENTS if e["id"] == event_id)
+    account_id = session.get("elder_id", "E001")
+    event = next(e for e in bank.GUARD_EVENTS
+                 if e["id"] == event_id
+                 and e.get("account_id", "E001") == account_id)
     done: list[dict] = []
-    acc = bank.ACCOUNTS["E001"]
+    acc = bank.ACCOUNTS[session.get("elder_id", "E001")]
     if event["lock_amount"]:
         acc["locked"] += event["lock_amount"]
         done.append({"step": "锁定活期", "detail": f"锁定 {money(event['lock_amount'])} 元作为「{event['title']}」专项预算",
@@ -1056,18 +1082,24 @@ def run_guard_event(event_id: str, session: dict) -> dict:
 # --------------------------------------------------------------------------
 
 
-def emergency_stop(reason: str) -> dict:
+def emergency_stop(reason: str, account_id: str | None = None) -> dict:
     frozen = []
-    for acc in bank.ACCOUNTS.values():
+    accounts = (bank.ACCOUNTS.values() if account_id is None
+                else [bank.ACCOUNTS[account_id]])
+    for acc in accounts:
         acc["emergency_stopped"] = True
         frozen.append(acc["id"])
-    for card in bank.CARDS:
+    cards = (bank.CARDS if account_id is None
+             else bank.scoped(bank.CARDS, account_id))
+    for card in cards:
         card["status"] = "冻结"
+    subscriptions = (bank.SUBSCRIPTIONS if account_id is None
+                     else bank.scoped(bank.SUBSCRIPTIONS, account_id))
     report = {
         "summary": "已冻结全部支付渠道（账户、卡片、快捷支付、代扣）",
         "frozen_accounts": frozen,
-        "frozen_cards": [c["id"] for c in bank.CARDS],
-        "cancelled_autopay": [s["merchant"] for s in bank.SUBSCRIPTIONS if s["status"] == "active"],
+        "frozen_cards": [c["id"] for c in cards],
+        "cancelled_autopay": [s["merchant"] for s in subscriptions if s["status"] == "active"],
         "notified": ["张伟（儿子）", "张敏（女儿）", "人工坐席"],
         "reason": reason,
         "hotline": "96110",
@@ -1082,9 +1114,9 @@ def emergency_stop(reason: str) -> dict:
 
 
 def update_limits(free_limit: float | None = None, single_limit: float | None = None,
-                  actor: str = "张伟") -> dict:
+                  actor: str = "张伟", account_id: str = "E001") -> dict:
     """子女只能收紧额度，放宽必须走老人的临时提额审批流程。"""
-    limits = bank.LIMITS["E001"]
+    limits = bank.LIMITS[account_id]
     changes: list[str] = []
     if free_limit is not None:
         if free_limit > limits["free_limit"]:
@@ -1101,14 +1133,16 @@ def update_limits(free_limit: float | None = None, single_limit: float | None = 
     return {"limits": limits, "changes": changes}
 
 
-def proxy_action(kind: str, target: str, amount: float = 0.0, actor: str = "张伟") -> dict:
+def proxy_action(kind: str, target: str, amount: float = 0.0, actor: str = "张伟",
+                 account_id: str = "E001") -> dict:
     """子女代购 / 代缴。不走转账权限分级，但依然要过理财适当性闸门并全程留痕。"""
-    acc = bank.ACCOUNTS["E001"]
+    acc = bank.ACCOUNTS[account_id]
     if kind == "bill":
         acc["balance"] -= amount
         tx = {"id": bank.next_id("T", bank.TRANSACTIONS), "date": bank.today(),
               "time": datetime.now().strftime("%H:%M"), "amount": amount, "direction": "out",
-              "counterparty": target, "category": "缴费", "channel": "子女代缴"}
+              "counterparty": target, "category": "缴费", "channel": "子女代缴",
+              "account_id": account_id}
         bank.TRANSACTIONS.insert(0, tx)
         audit("execute", actor, f"子女代缴 {target} {money(amount)} 元", tx=tx)
         return {"summary": f"已代缴「{target}」{money(amount)} 元", "tx": tx,
@@ -1123,7 +1157,8 @@ def proxy_action(kind: str, target: str, amount: float = 0.0, actor: str = "张�
                 "risk": gate.model_dump(mode="json")}
     acc["balance"] -= amount
     bank.HOLDINGS.append({"id": bank.next_id("H", bank.HOLDINGS),
-                          "product_id": product["id"], "amount": amount})
+                          "product_id": product["id"], "amount": amount,
+                          "account_id": account_id})
     audit("execute", actor, f"子女代购「{product['name']}」{money(amount)} 元",
           product=product["name"], amount=amount)
     return {"summary": f"已代购「{product['name']}」{money(amount)} 元", "balance": acc["balance"]}

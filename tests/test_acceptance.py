@@ -639,6 +639,24 @@ class MultiAccountCase(unittest.TestCase):
         self.assertTrue(any(item["type"] == "amount_spike" for item in evidence))
         self.assertEqual(risk.behavior_evidence(1000.0, "老李", "E001"), [])
 
+    def test_domain_state_isolated_for_cards_subscriptions_and_holdings(self):
+        e001_cards = {card["id"] for card in bank.scoped(bank.CARDS, "E001")}
+        e002_cards = {card["id"] for card in bank.scoped(bank.CARDS, "E002")}
+        self.assertTrue(e001_cards.isdisjoint(e002_cards))
+        self.assertEqual(len(agent.scan_subscriptions("E001")["items"]), 3)
+        self.assertEqual(len(agent.scan_subscriptions("E002")["items"]), 3)
+        self.assertNotEqual(
+            {h["id"] for h in bank.scoped(bank.HOLDINGS, "E001")},
+            {h["id"] for h in bank.scoped(bank.HOLDINGS, "E002")},
+        )
+
+    def test_emergency_stop_can_be_scoped_to_one_elder(self):
+        agent.emergency_stop("E002 account test", "E002")
+        self.assertTrue(bank.ACCOUNTS["E002"]["emergency_stopped"])
+        self.assertFalse(bank.ACCOUNTS["E001"]["emergency_stopped"])
+        self.assertTrue(all(c["status"] == "正常"
+                            for c in bank.scoped(bank.CARDS, "E001")))
+
     def test_annual_intent_switches_period(self):
         payload = agent.create_session(PlanRequest(text="今年一共花了多少"))
         self.assertEqual(payload["plan"]["steps"][0]["params"]["period"], "year")

@@ -148,7 +148,7 @@ WEALTH_PRODUCTS: list[dict] = [
 ]
 
 HOLDINGS: list[dict] = [
-    {"id": "H01", "product_id": "W03", "amount": 5000.00},
+    {"id": "H01", "product_id": "W03", "amount": 5000.00, "account_id": "E001"},
 ]
 
 # --------------------------------------------------------------------------
@@ -157,7 +157,9 @@ HOLDINGS: list[dict] = [
 
 CARDS: list[dict] = [
     {"id": "CARD-001", "type": "借记卡", "tail": "6688", "status": "正常",
-     "loss_reported": False, "overseas_enabled": True, "replacement": None},
+     "loss_reported": False, "overseas_enabled": True, "replacement": None, "account_id": "E001"},
+    {"id": "CARD-002", "type": "借记卡", "tail": "1122", "status": "正常",
+     "loss_reported": False, "overseas_enabled": True, "replacement": None, "account_id": "E002"},
 ]
 
 # 新卡申请工单（卡申请场景）
@@ -195,6 +197,13 @@ SUBSCRIPTIONS: list[dict] = [
      "monthly_amount": 0.00, "next_charge": "-", "suspicious": False,
      "reason": "免密小额，无固定扣费", "status": "active"},
 ]
+for _subscription in SUBSCRIPTIONS:
+    _subscription.setdefault("account_id", "E001")
+SUBSCRIPTIONS.extend({
+    **subscription,
+    "id": f"{subscription['id']}-E002",
+    "account_id": "E002",
+} for subscription in copy.deepcopy(SUBSCRIPTIONS))
 
 # --------------------------------------------------------------------------
 # 守护日历（跨场景联动）
@@ -226,6 +235,13 @@ GUARD_EVENTS: list[dict] = [
         ],
     },
 ]
+for _event in GUARD_EVENTS:
+    _event.setdefault("account_id", "E001")
+
+
+def scoped(items: list[dict], account_id: str) -> list[dict]:
+    """Return records owned by one elder account; legacy records default to E001."""
+    return [item for item in items if item.get("account_id", "E001") == account_id]
 
 
 def reset() -> None:

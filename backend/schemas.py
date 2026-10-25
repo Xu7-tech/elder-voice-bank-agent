@@ -167,6 +167,7 @@ class AttackRequest(BaseModel):
 
 class SubscriptionCancelRequest(BaseModel):
     subscription_id: str
+    elder_id: str = "E001"
 
 
 class DeployPlanRequest(BaseModel):
@@ -181,6 +182,7 @@ class DeployPlanRequest(BaseModel):
 
 class EmergencyRequest(BaseModel):
     reason: str = "用户触发紧急止付暗语"
+    elder_id: str = "E001"
 
 
 def default_expiry(ttl_seconds: int = 300) -> datetime:
