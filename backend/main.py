@@ -193,30 +193,30 @@ def get_account(account_id: str):
 def get_transactions(account_id: str):
     if account_id not in bank.ACCOUNTS:
         raise HTTPException(status_code=404, detail="账户不存在")
-    return {"transactions": bank.TRANSACTIONS}
+    return {"transactions": bank.scoped(bank.TRANSACTIONS, account_id)}
 
 
 @app.get("/mock-bank/bill-report", tags=["模拟银行"])
-def get_bill_report(period: str = "month"):
+def get_bill_report(period: str = "month", elder_id: str = "E001"):
     """period=month 月度报告；period=year 年度报告。"""
-    return agent.bill_report("year" if period == "year" else "month")
+    return agent.bill_report("year" if period == "year" else "month", elder_id)
 
 
 @app.get("/mock-bank/schedules", tags=["模拟银行"])
-def get_schedules():
-    return {"schedules": bank.SCHEDULES}
+def get_schedules(elder_id: str = "E001"):
+    return {"schedules": bank.scoped(bank.SCHEDULES, elder_id)}
 
 
 @app.get("/mock-bank/wealth-products", tags=["模拟银行"])
-def get_wealth_products():
-    return {"products": bank.WEALTH_PRODUCTS, "holdings": bank.HOLDINGS,
+def get_wealth_products(elder_id: str = "E001"):
+    return {"products": bank.WEALTH_PRODUCTS, "holdings": bank.scoped(bank.HOLDINGS, elder_id),
             "elder_risk_band": ["R1", "R2"]}
 
 
 @app.get("/mock-bank/cards", tags=["模拟银行"])
-def get_cards():
-    return {"cards": bank.CARDS, "limits": bank.LIMITS["E001"],
-            "applications": bank.CARD_APPLICATIONS}
+def get_cards(elder_id: str = "E001"):
+    return {"cards": bank.scoped(bank.CARDS, elder_id), "limits": bank.LIMITS[elder_id],
+            "applications": bank.scoped(bank.CARD_APPLICATIONS, elder_id)}
 
 
 @app.post("/mock-bank/limits", tags=["模拟银行"])
@@ -256,23 +256,26 @@ def lock_card(card_id: str, feature: str = "overseas", enable: bool = False):
 
 
 @app.get("/mock-bank/subscriptions", tags=["模拟银行"])
-def get_subscriptions():
-    return agent.scan_subscriptions()
+def get_subscriptions(elder_id: str = "E001"):
+    return agent.scan_subscriptions(elder_id)
 
 
 @app.post("/mock-bank/subscriptions/cancel", tags=["模拟银行"])
 def cancel_subscription(req: SubscriptionCancelRequest):
-    sub = next((s for s in bank.SUBSCRIPTIONS if s["id"] == req.subscription_id), None)
+    sub = next((s for s in bank.SUBSCRIPTIONS
+                if s["id"] == req.subscription_id
+                and s.get("account_id", "E001") == req.elder_id), None)
     if sub is None:
         raise HTTPException(status_code=404, detail="订阅不存在")
     return agent._execute_step(
         agent.PlanStep(tool="subscription.cancel",
-                       params={"subscription_id": req.subscription_id}), {})
+                       params={"subscription_id": req.subscription_id}),
+        {"elder_id": req.elder_id})
 
 
 @app.post("/mock-bank/emergency-stop", tags=["模拟银行"])
 async def emergency(req: EmergencyRequest):
-    result = agent.emergency_stop(req.reason)
+    result = agent.emergency_stop(req.reason, req.elder_id)
     await agent.notify({
         "type": "emergency_stop",
         "title": "老人触发了紧急止付",
@@ -289,16 +292,19 @@ async def emergency(req: EmergencyRequest):
 
 
 @app.get("/guard/events", tags=["守护日历"])
-def guard_events(today: str | None = None):
-    return {"events": bank.GUARD_EVENTS, "due": agent.due_guard_events(today)}
+def guard_events(today: str | None = None, elder_id: str = "E001"):
+    return {"events": bank.scoped(bank.GUARD_EVENTS, elder_id),
+            "due": agent.due_guard_events(today, elder_id)}
 
 
 @app.post("/guard/run", tags=["守护日历"])
-def guard_run(event_id: str, today: str | None = None):
-    event = next((e for e in bank.GUARD_EVENTS if e["id"] == event_id), None)
+def guard_run(event_id: str, today: str | None = None, elder_id: str = "E001"):
+    event = next((e for e in bank.GUARD_EVENTS
+                  if e["id"] == event_id
+                  and e.get("account_id", "E001") == elder_id), None)
     if event is None:
         raise HTTPException(status_code=404, detail="事件不存在")
-    return agent.run_guard_event(event_id, {})
+    return agent.run_guard_event(event_id, {"elder_id": elder_id})
 
 
 @app.post("/guard/deploy", tags=["守护日历"])
