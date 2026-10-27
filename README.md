@@ -21,17 +21,18 @@
 
 ---
 
-## 交付物清单
+## 交付物清单（按提交槽位）
 
-| 交付要求 | 对应文件 |
-|---|---|
-| **① 可执行代码**：Agent 系统源码 | [`backend/`](backend/)　·　[`frontend/`](frontend/) |
-| 　·　沙箱银行环境 | [`backend/bank.py`](backend/bank.py)（账户 / 流水 / 理财 / 卡片 / 订阅 / 限额 / 票据，不接真实银行） |
-| 　·　评测脚本 | [`scripts/evaluate.py`](scripts/evaluate.py)　→　[`reports/评测指标结果.md`](reports/评测指标结果.md) |
-| **② 作品介绍 PPT**（14 页） | [`deliverables/作品介绍.pptx`](deliverables/作品介绍.pptx)：痛点背景 → 系统架构 → 场景演示（9 张实拍截图 + 3 段内嵌录屏）→ 安全机制 → 技术创新 → 商业价值 |
-| **③ 技术文档** | 本 README　·　[架构图](docs/images/architecture.svg)　·　[场景覆盖表](docs/场景覆盖表.md)　·　[安全测试用例](docs/安全测试用例.md)　·　[评测指标结果](reports/评测指标结果.md) |
-| 　·　完整技术方案 | [`docs/技术方案.md`](docs/技术方案.md)（架构、数据流、接口契约、合规边界、答辩要点） |
-| **④ 作品演示视频**（3–5 分钟） | [`deliverables/作品演示视频.mp4`](deliverables/作品演示视频.mp4)：自然语言对话 → 转账 / 理财 / 挂卡 / 跨场景联动全流程 |
+| 槽位 | 材料 | 对应文件 |
+|---|---|---|
+| **01** | 技术文档（必交） | [`deliverables/01_技术文档.pdf`](deliverables/01_技术文档.pdf)（12 页，含系统架构图、核心算法说明、安全设计）<br>源文件：[`docs/技术方案.md`](docs/技术方案.md) |
+| **02** | 答辩材料（必交） | [`deliverables/02_答辩材料_作品介绍.pptx`](deliverables/02_答辩材料_作品介绍.pptx)（14 页，9 张实拍截图 + 3 段内嵌录屏） |
+| **03** | 源代码与部署材料（必交） | `deliverables/03_源代码与部署材料.zip`（构建产物，不入库；含 README、部署脚本、测试用例、CI） |
+| **04** | 安全自评报告（必交） | [`deliverables/04_安全自评报告.pdf`](deliverables/04_安全自评报告.pdf)（8 页，权限分级实现说明 + 已知风险清单）<br>源文件：[`docs/安全自评报告.md`](docs/安全自评报告.md) |
+| **05** | 演示视频（可选） | [`deliverables/05_演示视频.mp4`](deliverables/05_演示视频.mp4)（4 分 15 秒） |
+
+技术文档与安全自评报告由 `python scripts/build_docs.py` 从 Markdown 生成，
+改完 `docs/` 下的源文件后重跑即可，无需手工排版。
 
 ---
 
