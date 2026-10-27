@@ -129,6 +129,23 @@ PARAPHRASE_SET = [
     ("帮我查查有没有被人偷偷开通的服务", "subscription_scan"),
 ]
 
+# 扩展泛化集：不参与原有 48 条意图指标，用于观察新表达的迁移能力。
+# 它不是外部真实用户盲测，报告中必须与主指标分开呈现。
+HOLDOUT_SET = [
+    ("我想给老李意思一下五百", "transfer"),
+    ("闺女手头紧，我给她凑两千", "transfer"),
+    ("上个月有没有多扣我的钱", "subscription_scan"),
+    ("帮我看看最近的花销", "bill_analysis"),
+    ("我想把卡先锁住", "card_switch"),
+    ("给孙子发个红包三百", "transfer"),
+    ("下个月开始每月给儿子打一千", "transfer_schedule"),
+    ("我不认识这笔扣款，帮我查查", "subscription_scan"),
+    ("把我买的理财卖掉", "wealth_redeem"),
+    ("我想办张普通银行卡", "card_apply"),
+    ("最近要交什么费用", "calendar_query"),
+    ("有人催我马上转钱，先别转", "emergency_stop"),
+]
+
 
 def pct(hit: int, total: int) -> float:
     return round(hit / total * 100, 1) if total else 0.0
@@ -272,6 +289,25 @@ def run() -> dict:
         "cases": paraphrase_rows,
     }
 
+    # ---- 5c 扩展泛化集（不并入主指标） ----
+    holdout_rows = []
+    holdout_rule_hit = holdout_final_hit = 0
+    for text, expect in HOLDOUT_SET:
+        by_rule = nlu.parse_intent_rule(text, "mandarin").name
+        final = nlu.parse_intent(text).name if live else by_rule
+        holdout_rule_hit += by_rule == expect
+        holdout_final_hit += final == expect
+        holdout_rows.append({"utterance": text, "expected": expect,
+                             "rule_only": by_rule, "final": final,
+                             "pass": final == expect})
+    result["generalization_holdout"] = {
+        "llm_live": live, "total": len(HOLDOUT_SET),
+        "rule_only_accuracy": pct(holdout_rule_hit, len(HOLDOUT_SET)),
+        "with_llm_accuracy": pct(holdout_final_hit, len(HOLDOUT_SET)) if live else None,
+        "note": "扩展表达观察集，不并入主意图准确率；不是外部真实用户盲测。",
+        "cases": holdout_rows,
+    }
+
     # ---- 6 授权票据安全性 ----
     agent.reset_all()
     ticket_checks = []
@@ -408,7 +444,8 @@ def to_markdown(r: dict) -> str:
         f"| 端到端规划延迟 P50 | **{r['latency']['p50_ms']} ms** | "
         f"P95 {r['latency']['p95_ms']} ms，最大 {r['latency']['max_ms']} ms"
         f"（{r['latency']['rounds']} 次采样） |",
-        f"| 赛题场景覆盖率 | **{r['scenario_coverage_rate']}%** | 6 大场景 / 25 项能力 |",
+        f"| 赛题场景覆盖率 | **{r['scenario_coverage_rate']}%** | 6 大场景 / "
+        f"{sum(v['total'] for v in r['scenario_coverage'].values())} 项能力 |",
         "",
         "## 二、意图理解",
         "",
@@ -456,6 +493,19 @@ def to_markdown(r: dict) -> str:
                      f"接上 `LLM_API_KEY` 后这里会给出对照值。")
     lines += ["", "| 用户原话 | 期望 | 仅规则解析器 | 最终结果 |", "|---|---|---|---|"]
     for c in up["cases"]:
+        lines.append(f"| {c['utterance']} | {c['expected']} | {c['rule_only']} | {c['final']} |")
+
+    holdout = r["generalization_holdout"]
+    lines += ["", "## 五点六、扩展泛化集（不并入主指标）", "",
+              holdout["note"]]
+    if holdout["llm_live"]:
+        lines.append(f"规则解析器单独识别 **{holdout['rule_only_accuracy']}%**，"
+                     f"接入大模型后 **{holdout['with_llm_accuracy']}%**。")
+    else:
+        lines.append(f"当前未接入大模型：规则解析器识别 **{holdout['rule_only_accuracy']}%**，"
+                     "接入大模型后再测量最终结果。")
+    lines += ["", "| 用户原话 | 期望 | 仅规则解析器 | 最终结果 |", "|---|---|---|---|"]
+    for c in holdout["cases"]:
         lines.append(f"| {c['utterance']} | {c['expected']} | {c['rule_only']} | {c['final']} |")
 
     d = r["injection_defense"]
@@ -512,11 +562,17 @@ def main() -> None:
     print(f"  票据安全项通过率      {t['overall']:>6}%   ({t['hit']}/{t['total']})")
     print(f"  规划延迟 P50 / P95    {result['latency']['p50_ms']:>6} / "
           f"{result['latency']['p95_ms']} ms")
-    print(f"  场景覆盖率            {result['scenario_coverage_rate']:>6}%")
+    scene_total = sum(v["total"] for v in result["scenario_coverage"].values())
+    print(f"  场景覆盖率            {result['scenario_coverage_rate']:>6}%   "
+          f"（6 大场景 / {scene_total} 项能力）")
     up = result["llm_uplift"]
     uplift = (f"{up['rule_only_accuracy']}% → {up['with_llm_accuracy']}%"
               if up["llm_live"] else f"{up['rule_only_accuracy']}%（未接入大模型）")
     print(f"  规则盲区识别率        {uplift:>6}   （大模型增量）")
+    holdout = result["generalization_holdout"]
+    holdout_rate = (f"{holdout['rule_only_accuracy']}% → {holdout['with_llm_accuracy']}%"
+                    if holdout["llm_live"] else f"{holdout['rule_only_accuracy']}%（未接入大模型）")
+    print(f"  扩展泛化集识别率      {holdout_rate:>6}   （不并入主指标）")
     if d.get("llm_only_scripts"):
         print(f"  依赖大模型的剧本      {len(d['llm_only_scripts']):>6} 条 未计入主口径")
     print("=" * 62)

@@ -45,10 +45,12 @@ class RiskDecision(BaseModel):
     limits: dict[str, Any] = Field(default_factory=dict)
     blocked: bool = False
     injection_hits: list[str] = Field(default_factory=list)
+    evidence: list[dict[str, Any]] = Field(default_factory=list)
 
 
 class AuthTicket(BaseModel):
     id: str
+    elder_id: str = "E001"
     amount: float
     payee: str
     payee_account: str = ""
@@ -66,6 +68,8 @@ class AuditEntry(BaseModel):
     actor: str
     note: str = ""
     detail: dict[str, Any] = Field(default_factory=dict)
+    prev_hash: str = ""
+    entry_hash: str = ""
 
 
 class Subscription(BaseModel):
@@ -136,6 +140,7 @@ class TtsRequest(BaseModel):
 
 
 class RiskRequest(BaseModel):
+    elder_id: str = "E001"
     amount: float = 0.0
     payee: str = ""
     hour: int | None = None
@@ -162,6 +167,7 @@ class AttackRequest(BaseModel):
 
 class SubscriptionCancelRequest(BaseModel):
     subscription_id: str
+    elder_id: str = "E001"
 
 
 class DeployPlanRequest(BaseModel):
@@ -176,6 +182,7 @@ class DeployPlanRequest(BaseModel):
 
 class EmergencyRequest(BaseModel):
     reason: str = "用户触发紧急止付暗语"
+    elder_id: str = "E001"
 
 
 def default_expiry(ttl_seconds: int = 300) -> datetime:

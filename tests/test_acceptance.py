@@ -6,11 +6,15 @@ from __future__ import annotations
 
 import base64
 import json
+import os
 import pathlib
 import re
 import sys
+import tempfile
+import threading
 import unittest
 from datetime import datetime, timedelta
+from unittest.mock import patch
 
 # 测试一律在降级模式下运行：确定性、离线可跑、不消耗 API 额度。
 # 必须放在导入 backend 之前 —— backend 包会在导入时读取 .env。
@@ -114,6 +118,17 @@ class IntentCase(unittest.TestCase):
         self.assertEqual(payload["status"], "clarify")
         self.assertIn("多少钱", payload["elder_text"])
 
+    def test_holdout_phrases_keep_action_direction(self):
+        cases = [
+            ("把我买的理财卖掉", "wealth_redeem"),
+            ("我想把卡先锁住", "card_switch"),
+            ("有人催我马上转钱，先别转", "emergency_stop"),
+            ("我不认识这笔扣款，帮我查查", "subscription_scan"),
+        ]
+        for text, expected in cases:
+            with self.subTest(text=text):
+                self.assertEqual(nlu.parse_intent_rule(text, "mandarin").name, expected)
+
 
 class CantoneseCase(unittest.TestCase):
     """粤语识别：归一化后的句式变化样本（繁简混排，模拟真实转写结果）。"""
@@ -213,6 +228,62 @@ class PermissionCase(unittest.TestCase):
         self.assertEqual(self.level("给陈志强转一千块"), RiskLevel.L3)
         self.assertEqual(self.level("给老李转九万块"), RiskLevel.L3)            # 超余额
 
+    def test_behavior_amount_spike_escalates_to_l2(self):
+        bank.TRANSACTIONS.extend([
+            {"id": "B001", "date": bank.today(), "time": "10:00", "amount": 100.0,
+             "direction": "out", "counterparty": "李建国", "category": "转账"},
+            {"id": "B002", "date": bank.today(), "time": "10:05", "amount": 120.0,
+             "direction": "out", "counterparty": "李建国", "category": "转账"},
+        ])
+        decision = risk.evaluate(amount=1000, payee="李建国", hour=10,
+                                 utterance="给老李转一千块")
+        self.assertEqual(decision.level, RiskLevel.L2)
+        self.assertTrue(any(e["type"] == "amount_spike" for e in decision.evidence))
+
+    def test_behavior_burst_escalates_to_l2(self):
+        bank.TRANSACTIONS.extend([
+            {"id": "B003", "date": bank.today(), "time": "10:00", "amount": 50.0,
+             "direction": "out", "counterparty": "李建国", "category": "转账"},
+            {"id": "B004", "date": bank.today(), "time": "10:05", "amount": 50.0,
+             "direction": "out", "counterparty": "李建国", "category": "转账"},
+            {"id": "B005", "date": bank.today(), "time": "10:10", "amount": 50.0,
+             "direction": "out", "counterparty": "李建国", "category": "转账"},
+        ])
+        decision = risk.evaluate(amount=50, payee="李建国", hour=10,
+                                 utterance="给老李转五十块")
+        self.assertEqual(decision.level, RiskLevel.L2)
+        self.assertTrue(any(e["type"] == "same_day_burst" for e in decision.evidence))
+
+    def test_behavior_signals_are_disabled_with_defense(self):
+        bank.TRANSACTIONS.extend([
+            {"id": "B006", "date": bank.today(), "time": "10:00", "amount": 100.0,
+             "direction": "out", "counterparty": "李建国", "category": "转账"},
+            {"id": "B007", "date": bank.today(), "time": "10:05", "amount": 100.0,
+             "direction": "out", "counterparty": "李建国", "category": "转账"},
+        ])
+        decision = risk.evaluate(amount=1000, payee="李建国", hour=10,
+                                 utterance="给老李转一千块", defense_enabled=False)
+        self.assertEqual(decision.level, RiskLevel.L1)
+        self.assertFalse(decision.evidence)            # 超余额
+
+    def test_relationship_expert_combines_features_and_explains_them(self):
+        decision = risk.evaluate(
+            amount=100, payee="李建国", hour=2, device_trusted=False,
+            utterance="给老李转一百块")
+        self.assertEqual(decision.level, RiskLevel.L2)
+        expert = next(e for e in decision.evidence if e["type"] == "relationship_expert")
+        self.assertGreaterEqual(expert["score"], risk.RELATIONSHIP_EXPERT_THRESHOLD)
+        self.assertEqual(
+            {f["feature"] for f in expert["features"]},
+            {"no_prior_payee_transfer", "inactive_time", "untrusted_device"},
+        )
+
+    def test_relationship_expert_never_runs_when_defense_is_disabled(self):
+        decision = risk.evaluate(
+            amount=100, payee="李建国", hour=2, device_trusted=False,
+            utterance="给老李转一百块", defense_enabled=False)
+        self.assertFalse(decision.evidence)
+
     def test_emergency_stop_blocks_every_transfer(self):
         agent.emergency_stop("用户触发紧急止付暗语")
         payload = agent.create_session(PlanRequest(text="给老李转五十块", hour=10))
@@ -301,6 +372,41 @@ class AuthTicketCase(unittest.TestCase):
         # 票据金额被下调后，与原始执行参数不一致，执行必须被拒绝
         self.assertIn("不一致", agent.execute(self.sid)["error"])
 
+    def test_execute_is_idempotent(self):
+        agent.approve_ticket(AuthApproveRequest(ticket_id=self.ticket_id, approver="张伟"))
+        first = agent.execute(self.sid)
+        balance = bank.ACCOUNTS["E001"]["balance"]
+        second = agent.execute(self.sid)
+        self.assertEqual(first["status"], "executed")
+        self.assertEqual(second["status"], "executed")
+        self.assertEqual(bank.ACCOUNTS["E001"]["balance"], balance)
+        tx_id = first["result"]["steps"][0]["tx"]["id"]
+        self.assertEqual(sum(t.get("id") == tx_id for t in bank.TRANSACTIONS), 1)
+
+    def test_concurrent_execute_can_only_debit_once(self):
+        agent.approve_ticket(AuthApproveRequest(ticket_id=self.ticket_id, approver="张伟"))
+        results = []
+        threads = [
+            threading.Thread(target=lambda: results.append(agent.execute(self.sid)))
+            for _ in range(4)
+        ]
+        for thread in threads:
+            thread.start()
+        for thread in threads:
+            thread.join()
+        self.assertEqual(len(results), 4)
+        self.assertTrue(all(result["status"] == "executed" for result in results))
+        transfers = [t for t in bank.TRANSACTIONS if t.get("counterparty") == "张敏"]
+        self.assertEqual(len(transfers), 1)
+
+    def test_execution_rechecks_balance_after_authorization(self):
+        agent.approve_ticket(AuthApproveRequest(ticket_id=self.ticket_id, approver="张伟"))
+        bank.ACCOUNTS["E001"]["balance"] = 100.0
+        result = agent.execute(self.sid)
+        self.assertIn("余额不足", result["error"])
+        self.assertEqual(agent.TICKETS[self.ticket_id].status, "approved")
+        self.assertEqual(bank.ACCOUNTS["E001"]["balance"], 100.0)
+
 
 class InjectionDefenseCase(unittest.TestCase):
     """注入防御：≥10 条诈骗剧本，逐条验证拦截与资金零损失。"""
@@ -323,8 +429,9 @@ class InjectionDefenseCase(unittest.TestCase):
 
     def test_llm_only_script_needs_the_model(self):
         """ATK-13 是关键词库的盲区：降级模式下明确标为未测量。"""
-        self.assertFalse(nlu.llm_available())
-        result = attacks.run_script("ATK-13")
+        with patch.dict(os.environ, {"LLM_API_KEY": ""}):
+            self.assertFalse(nlu.llm_available())
+            result = attacks.run_script("ATK-13")
         self.assertTrue(result["requires_llm"])
         self.assertFalse(result["llm_live"])
         self.assertIsNone(result["defended"])
@@ -515,6 +622,55 @@ class BillReportCase(unittest.TestCase):
         year = agent.bill_report("year")
         self.assertGreater(year["total_out"], report["total_out"])
 
+
+class MultiAccountCase(unittest.TestCase):
+    """多老人账户隔离：余额、风控和授权会话不能串户。"""
+
+    def setUp(self):
+        agent.reset_all()
+
+    def test_second_elder_has_independent_balance_and_session(self):
+        first = bank.ACCOUNTS["E001"]["balance"]
+        second = bank.ACCOUNTS["E002"]["balance"]
+        payload = agent.create_session(PlanRequest(text="查询余额", elder_id="E002"))
+        self.assertEqual(payload["elder_id"], "E002")
+        done = agent.confirm(payload["session_id"], ConfirmRequest(
+            session_id=payload["session_id"], ack_voice=True, ack_popup=True))
+        self.assertEqual(done["result"]["steps"][0]["balance"], second)
+        self.assertEqual(bank.ACCOUNTS["E001"]["balance"], first)
+
+    def test_unknown_elder_account_is_rejected(self):
+        payload = agent.create_session(PlanRequest(text="查询余额", elder_id="E999"))
+        self.assertIn("不存在", payload["error"])
+
+    def test_risk_history_is_filtered_by_account(self):
+        bank.TRANSACTIONS.insert(0, {
+            "id": "E002-T", "date": bank.today(), "time": "10:00",
+            "amount": 10.0, "direction": "out", "counterparty": "老李",
+            "category": "转账", "channel": "语音管家", "account_id": "E002",
+        })
+        evidence = risk.behavior_evidence(1000.0, "老李", "E002")
+        self.assertTrue(any(item["type"] == "amount_spike" for item in evidence))
+        self.assertEqual(risk.behavior_evidence(1000.0, "老李", "E001"), [])
+
+    def test_domain_state_isolated_for_cards_subscriptions_and_holdings(self):
+        e001_cards = {card["id"] for card in bank.scoped(bank.CARDS, "E001")}
+        e002_cards = {card["id"] for card in bank.scoped(bank.CARDS, "E002")}
+        self.assertTrue(e001_cards.isdisjoint(e002_cards))
+        self.assertEqual(len(agent.scan_subscriptions("E001")["items"]), 3)
+        self.assertEqual(len(agent.scan_subscriptions("E002")["items"]), 3)
+        self.assertNotEqual(
+            {h["id"] for h in bank.scoped(bank.HOLDINGS, "E001")},
+            {h["id"] for h in bank.scoped(bank.HOLDINGS, "E002")},
+        )
+
+    def test_emergency_stop_can_be_scoped_to_one_elder(self):
+        agent.emergency_stop("E002 account test", "E002")
+        self.assertTrue(bank.ACCOUNTS["E002"]["emergency_stopped"])
+        self.assertFalse(bank.ACCOUNTS["E001"]["emergency_stopped"])
+        self.assertTrue(all(c["status"] == "正常"
+                            for c in bank.scoped(bank.CARDS, "E001")))
+
     def test_annual_intent_switches_period(self):
         payload = agent.create_session(PlanRequest(text="今年一共花了多少"))
         self.assertEqual(payload["plan"]["steps"][0]["params"]["period"], "year")
@@ -648,7 +804,8 @@ class DegradedModeCase(unittest.TestCase):
         agent.reset_all()
 
     def test_cloud_providers_report_unavailable(self):
-        self.assertFalse(nlu.llm_available())
+        with patch.dict(os.environ, {"LLM_API_KEY": ""}):
+            self.assertFalse(nlu.llm_available())
         self.assertFalse(voice.stt_available())
 
     def test_asr_falls_back_to_offline_corpus(self):
@@ -831,10 +988,52 @@ class AuditCase(unittest.TestCase):
         notes = " ".join(e.note for e in agent.AUDIT)
         self.assertIn("L3", notes)
 
+    def test_behavior_evidence_is_audited(self):
+        bank.TRANSACTIONS.extend([
+            {"id": "AUDIT-B001", "date": bank.today(), "time": "10:00", "amount": 100.0,
+             "direction": "out", "counterparty": "李建国", "category": "转账"},
+            {"id": "AUDIT-B002", "date": bank.today(), "time": "10:05", "amount": 120.0,
+             "direction": "out", "counterparty": "李建国", "category": "转账"},
+        ])
+        payload = agent.create_session(PlanRequest(text="给老李转一千块"))
+        risk_entries = [e for e in agent.AUDIT if e.stage == "risk"]
+        self.assertTrue(payload["risk"]["evidence"])
+        self.assertEqual(risk_entries[-1].detail["evidence"], payload["risk"]["evidence"])
+
     def test_audit_is_serializable(self):
         agent.create_session(PlanRequest(text="给老李转五十块"))
         dumped = [e.model_dump(mode="json") for e in agent.AUDIT]
         self.assertTrue(dumped and "ts" in dumped[0])
+
+    def test_audit_chain_is_valid_and_detects_tampering(self):
+        agent.create_session(PlanRequest(text="给老李转五十块"))
+        checked = agent.verify_audit_chain()
+        self.assertTrue(checked["valid"])
+        self.assertGreater(checked["entries"], 0)
+        original = agent.AUDIT[0].note
+        agent.AUDIT[0].note = original + "（被篡改）"
+        tampered = agent.verify_audit_chain()
+        self.assertFalse(tampered["valid"])
+        agent.AUDIT[0].note = original
+
+    def test_audit_entries_have_chain_hashes(self):
+        agent.create_session(PlanRequest(text="给老李转五十块"))
+        self.assertTrue(agent.AUDIT[0].entry_hash)
+        if len(agent.AUDIT) > 1:
+            self.assertEqual(agent.AUDIT[1].prev_hash, agent.AUDIT[0].entry_hash)
+
+    def test_audit_store_recovers_entries_after_reconfiguration(self):
+        with tempfile.TemporaryDirectory() as folder:
+            path = str(pathlib.Path(folder) / "audit.sqlite3")
+            try:
+                agent.configure_audit_store(path)
+                agent.create_session(PlanRequest(text="给老李转五十块"))
+                expected = len(agent.AUDIT)
+                agent.configure_audit_store(path)
+                self.assertEqual(len(agent.AUDIT), expected)
+                self.assertTrue(agent.verify_audit_chain()["valid"])
+            finally:
+                agent.configure_audit_store(":memory:")
 
 
 class FrontendStaticCase(unittest.TestCase):
@@ -878,6 +1077,14 @@ class FrontendStaticCase(unittest.TestCase):
         self.assertIn("background", block)
         self.assertIn("--brand-dark", block)
 
+    def test_risk_evidence_has_a_visible_card(self):
+        html = (ROOT / "frontend" / "index.html").read_text(encoding="utf-8")
+        css = (ROOT / "frontend" / "styles.css").read_text(encoding="utf-8")
+        js = (ROOT / "frontend" / "app.js").read_text(encoding="utf-8")
+        self.assertIn('id="riskEvidence"', html)
+        self.assertIn(".risk-evidence", css)
+        self.assertIn("renderRiskEvidence", js)
+
 
 class FakeLLMMixin:
     """把 call_llm 换成可控的假响应，用于验证接入逻辑本身。"""
@@ -913,6 +1120,15 @@ class LLMIntegrationCase(FakeLLMMixin, unittest.TestCase):
         self.assertIn("arbitration", intent.slots)
         payload = agent.create_session(PlanRequest(text="每个月1号给老李转五百块", hour=10))
         self.assertEqual(payload["plan"]["steps"][0]["tool"], "transfer.schedule")
+
+    def test_specific_rule_intents_are_not_overridden_by_generic_bill_analysis(self):
+        self.fake_llm([{"intent": "bill_analysis"}])
+        subscription = nlu.parse_intent("我不认识这笔扣款，帮我查查")
+        calendar = nlu.parse_intent("我今天有什么安排")
+        self.assertEqual(subscription.name, "subscription_scan")
+        self.assertEqual(calendar.name, "calendar_query")
+        self.assertIn("arbitration", subscription.slots)
+        self.assertIn("arbitration", calendar.slots)
 
     def test_model_takes_over_only_for_rule_blind_phrasing(self):
         self.fake_llm([{"intent": "transfer", "payee": "老李", "amount": 500}])

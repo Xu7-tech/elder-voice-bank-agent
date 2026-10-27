@@ -1,0 +1,41 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ["3.11", "3.12"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Install dependencies
+        run: python -m pip install -r requirements.txt
+      - name: Run tests
+        env:
+          LLM_API_KEY: ""
+          XFYUN_APP_ID: ""
+          XFYUN_API_KEY: ""
+          XFYUN_API_SECRET: ""
+          XFYUN_TTS_KEY: ""
+          XFYUN_TTS_SECRET: ""
+        run: python -m unittest discover -s tests -v
+      - name: Compile Python sources
+        run: python -m compileall -q backend scripts tests
+      - name: Run offline evaluation
+        env:
+          LLM_API_KEY: ""
+          XFYUN_APP_ID: ""
+          XFYUN_API_KEY: ""
+          XFYUN_API_SECRET: ""
+          XFYUN_TTS_KEY: ""
+          XFYUN_TTS_SECRET: ""
+        run: python scripts/evaluate.py
